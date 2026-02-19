@@ -177,6 +177,90 @@ A premium desktop client for [OpenClaw](https://github.com/openclaw/openclaw) �
 
 ---
 
+## 🔌 How It Works
+
+AEGIS Desktop is a frontend client — it doesn't store or generate any data on its own. All intelligence, sessions, and history live in your **OpenClaw Gateway**.
+
+### Data Flow
+
+```
+OpenClaw Gateway (local or remote)
+        │
+        │  WebSocket (ws://)
+        ▼
+  AEGIS Desktop
+  ├── Chat       ← sends messages, receives streaming responses
+  ├── Dashboard  ← polls sessions, cost, and agent status
+  ├── Analytics  ← fetches cost summary and token usage history
+  ├── Agent Hub  ← reads and manages registered agents
+  ├── Cron       ← lists, runs, pauses, and edits scheduled jobs
+  └── Workshop   ← local Kanban board (stored in-app)
+```
+
+### Where Data Comes From
+
+| Page | Source |
+|------|--------|
+| Chat history | `gateway.getHistory()` — loaded on demand |
+| Cost & tokens | `gateway.getCostSummary(days)` |
+| Sessions | `gateway.getSessions()` |
+| Agents | `gateway.getAgents()` |
+| Cron jobs | `gateway.getCronJobs()` |
+| Models | `config.get → agents.defaults.models` |
+| Workshop tasks | Local (stored in-app via Zustand) |
+
+### Requirements
+
+AEGIS Desktop requires a running **OpenClaw Gateway** instance. On first launch, you'll go through a one-time pairing flow that authenticates the app with your gateway using an Ed25519 device identity.
+
+### 🤖 Model Awareness (System Prompt)
+
+AEGIS Desktop injects a context block at the start of each conversation so the AI model knows it's running inside the app and can use its features.
+
+<details>
+<summary>View injected context</summary>
+
+```
+[AEGIS_DESKTOP_CONTEXT]
+You are connected via AEGIS Desktop — an Electron-based chat client with rich capabilities.
+
+CAPABILITIES:
+- User can attach: images (inline base64), files (sent as paths), screenshots, voice messages
+- You can send: markdown, images (![](url)), videos (![](url.mp4))
+- All markdown is rendered with syntax highlighting, tables, and RTL/LTR auto-detection
+- The interface is bilingual (Arabic/English) with automatic text direction
+
+ARTIFACTS (opens in a separate preview window):
+When asked for interactive content (dashboards, games, charts, UIs, diagrams), wrap it in:
+<aegis_artifact type="TYPE" title="Descriptive Title">
+  ...content...
+</aegis_artifact>
+
+Supported types:
+- html: Full HTML page (CSS/JS inline)
+- react: React component with JSX (React 18 + Babel pre-loaded)
+- svg: Raw SVG markup
+- mermaid: Mermaid diagram syntax
+
+FILE REFERENCES:
+- Non-image files arrive as: 📎 file: <path> (mime/type, size)
+- Voice messages arrive as: 🎤 [voice] <path> (duration)
+
+WORKSHOP (task management — Kanban board):
+- Add task:        [[workshop:add title="..." priority="high|medium|low"]]
+- Move task:       [[workshop:move id="..." status="queue|inProgress|done"]]
+- Delete task:     [[workshop:delete id="..."]]
+- Update progress: [[workshop:progress id="..." value="0-100"]]
+- List tasks:      [[workshop:list]]
+[/AEGIS_DESKTOP_CONTEXT]
+```
+
+</details>
+
+This context is injected once per conversation and not shown in the chat UI. The model uses it to render artifacts in the preview window, handle file and voice references correctly, and manage Workshop tasks via text commands.
+
+---
+
 ## 📦 Installation
 
 1. Download `AEGIS-Desktop-Setup-5.1.0.exe` from [Releases](../../releases)

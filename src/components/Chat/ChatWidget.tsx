@@ -103,17 +103,17 @@ export function ChatWidget() {
             onClick={() => setOpen(true)}
             className={clsx(
               'fixed bottom-5 z-50 w-[48px] h-[48px] rounded-2xl',
-              'bg-gradient-to-br from-[#4EC9B0] to-[#6C9FFF]',
+              'bg-gradient-to-br from-aegis-primary to-aegis-accent',
               'flex items-center justify-center',
               'fab-glow',
-              'hover:shadow-[0_12px_40px_rgba(78,201,176,0.4)]',
+              'hover:shadow-[0_12px_40px_rgb(var(--aegis-primary)/0.4)]',
               'transition-all duration-300',
               isRTL ? 'left-5' : 'right-5'
             )}
           >
             <MessageCircle size={20} className="text-white" />
             {unread > 0 && (
-              <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-[#F47067] text-white text-[10px] font-bold flex items-center justify-center">
+              <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-aegis-danger text-white text-[10px] font-bold flex items-center justify-center">
                 {unread}
               </span>
             )}
@@ -135,37 +135,34 @@ export function ChatWidget() {
               isRTL ? 'left-5' : 'right-5'
             )}
             style={{
-              background: 'rgba(12,16,21,0.97)',
+              background: 'var(--aegis-bg-frosted)',
               backdropFilter: 'blur(20px)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+              border: '1px solid rgb(var(--aegis-overlay) / 0.08)',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
             }}
           >
             {/* Header — dark with visible controls */}
             <div
               className="shrink-0 px-4 py-3 flex items-center justify-between"
-              style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)' }}
+              style={{ borderBottom: '1px solid rgb(var(--aegis-overlay) / 0.06)', background: 'rgb(var(--aegis-overlay) / 0.03)' }}
             >
               <div className="flex items-center gap-2">
-                <div
-                  className="w-7 h-7 rounded-lg flex items-center justify-center"
-                  style={{ background: 'rgba(78,201,176,0.15)' }}
-                >
-                  <MessageCircle size={14} className="text-[#4EC9B0]" />
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-aegis-primary/15">
+                  <MessageCircle size={14} className="text-aegis-primary" />
                 </div>
                 <span className="text-[13px] font-semibold text-aegis-text">{t('chat.quickChat')}</span>
               </div>
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => { setOpen(false); navigate('/chat'); }}
-                  className="p-1.5 rounded-lg hover:bg-white/[0.06] text-white/30 hover:text-white/50 transition-colors"
+                  className="p-1.5 rounded-lg hover:bg-[rgb(var(--aegis-overlay)/0.06)] text-aegis-text-muted hover:text-aegis-text-secondary transition-colors"
                   title={t('chat.openFullChat')}
                 >
                   <Maximize2 size={14} />
                 </button>
                 <button
                   onClick={() => setOpen(false)}
-                  className="p-1.5 rounded-lg hover:bg-white/[0.06] text-white/30 hover:text-white/50 transition-colors"
+                  className="p-1.5 rounded-lg hover:bg-[rgb(var(--aegis-overlay)/0.06)] text-aegis-text-muted hover:text-aegis-text-secondary transition-colors"
                 >
                   <X size={14} />
                 </button>
@@ -176,8 +173,8 @@ export function ChatWidget() {
             <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 scrollbar-hidden">
               {messages.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-full text-center gap-3">
-                  <MessageCircle size={32} className="text-white/15" />
-                  <span className="text-[12px] text-white/20">{t('chat.widgetPlaceholder')}</span>
+                  <MessageCircle size={32} className="text-aegis-text-dim" />
+                  <span className="text-[12px] text-aegis-text-dim">{t('chat.widgetPlaceholder')}</span>
                 </div>
               )}
               {messages.map((msg) => (
@@ -185,12 +182,10 @@ export function ChatWidget() {
                   key={msg.id}
                   className={clsx(
                     'max-w-[85%] px-3 py-2 rounded-xl text-[13px]',
-                    msg.role === 'user' ? 'ms-auto' : ''
+                    msg.role === 'user'
+                      ? 'ms-auto bg-aegis-primary/[0.12] text-aegis-text'
+                      : 'bg-[rgb(var(--aegis-overlay)/0.04)] text-aegis-text-muted'
                   )}
-                  style={msg.role === 'user'
-                    ? { background: 'rgba(78,201,176,0.12)', color: '#e6edf3' }
-                    : { background: 'rgba(255,255,255,0.04)', color: '#8b949e' }
-                  }
                 >
                   {msg.content}
                 </div>
@@ -201,7 +196,7 @@ export function ChatWidget() {
             {/* Input — dark themed */}
             <div
               className="shrink-0 px-3 py-3"
-              style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
+              style={{ borderTop: '1px solid rgb(var(--aegis-overlay) / 0.06)' }}
             >
               <div className="flex items-center gap-2">
                 <input
@@ -210,10 +205,10 @@ export function ChatWidget() {
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
                   placeholder={t('chat.typeMessage')}
-                  className="flex-1 rounded-xl px-3 py-2 text-[13px] text-aegis-text placeholder:text-white/20 focus:outline-none"
+                  className="flex-1 rounded-xl px-3 py-2 text-[13px] text-aegis-text placeholder:text-aegis-text-dim focus:outline-none"
                   style={{
-                    background: 'rgba(255,255,255,0.04)',
-                    border: '1px solid rgba(255,255,255,0.08)',
+                    background: 'rgb(var(--aegis-overlay) / 0.04)',
+                    border: '1px solid rgb(var(--aegis-overlay) / 0.08)',
                   }}
                   dir="auto"
                 />
@@ -222,8 +217,8 @@ export function ChatWidget() {
                   disabled={!input.trim() || sending || !connected}
                   className="p-2 rounded-xl transition-all disabled:opacity-30"
                   style={input.trim() && connected
-                    ? { background: '#4EC9B0', color: '#0c1015' }
-                    : { background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.2)' }
+                    ? { background: 'rgb(var(--aegis-primary))', color: 'var(--aegis-bg-solid)' }
+                    : { background: 'rgb(var(--aegis-overlay) / 0.04)', color: 'rgb(var(--aegis-overlay) / 0.2)' }
                   }
                 >
                   {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}

@@ -9,6 +9,7 @@ import { ChatImage } from './ChatImage';
 import { ChatVideo } from './ChatVideo';
 import { AudioPlayer } from './AudioPlayer';
 import type { ChatMessage } from '@/stores/chatStore';
+import { autoDetectCode } from '@/utils/autoDetectCode';
 import clsx from 'clsx';
 
 // ── Artifact Parser ──
@@ -107,7 +108,7 @@ function ArtifactCard({ artifact }: { artifact: ParsedArtifact }) {
           View source ({artifact.content.length} chars)
         </summary>
         <div className="px-4 pb-3 max-h-[200px] overflow-auto">
-          <pre className="text-[11px] text-aegis-text-dim font-mono whitespace-pre-wrap bg-black/20 rounded-lg p-3">
+          <pre className="text-[11px] text-aegis-text-dim font-mono whitespace-pre-wrap bg-[rgb(var(--aegis-overlay)/0.08)] rounded-lg p-3">
             {artifact.content.slice(0, 2000)}{artifact.content.length > 2000 ? '\n...(truncated)' : ''}
           </pre>
         </div>
@@ -136,7 +137,7 @@ const markdownComponents = {
     return (
       <code
         className="text-[13px] font-mono px-1.5 py-0.5 rounded"
-        style={{ background: 'rgba(78, 201, 176, 0.12)', color: '#4EC9B0' }}
+        style={{ background: 'rgb(var(--aegis-primary) / 0.12)', color: 'rgb(var(--aegis-primary))' }}
         {...props}
       >
         {children}
@@ -162,7 +163,7 @@ const markdownComponents = {
       <a
         href={href}
         onClick={(e) => { e.preventDefault(); if (href) window.open(href, '_blank'); }}
-        className="text-[#4EC9B0] hover:text-[#3DB89F] underline underline-offset-2"
+        className="text-aegis-primary hover:text-aegis-primary/70 underline underline-offset-2"
       >
         {children}
       </a>
@@ -208,7 +209,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onResend }: 
 
   const cleanContent = isUser
     ? rawContent.replace(/^\[.*?\]\s*/, '').replace(/\n\[message_id:.*?\]$/, '')
-    : rawContent;
+    : autoDetectCode(rawContent);
 
   const timeStr = (() => {
     try {
@@ -225,7 +226,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onResend }: 
       className={clsx(
         'group flex items-start gap-3 px-5 py-1.5 transition-colors',
         isUser ? 'flex-row-reverse' : '',
-        !isUser && 'hover:bg-white/[0.015]'
+        !isUser && 'hover:bg-[rgb(var(--aegis-overlay)/0.015)]'
       )}
       dir={dir}
       onMouseEnter={() => setShowActions(true)}
@@ -233,13 +234,12 @@ export const MessageBubble = memo(function MessageBubble({ message, onResend }: 
     >
       {/* Avatar */}
       {isUser ? (
-        <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
-          style={{ background: 'rgba(78, 201, 176, 0.15)', border: '1px solid rgba(78, 201, 176, 0.25)' }}>
-          <User size={14} className="text-[#4EC9B0]" />
+        <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 bg-aegis-primary/15 border border-aegis-primary/25">
+          <User size={14} className="text-aegis-primary" />
         </div>
       ) : (
-        <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#4EC9B0] to-[#6C9FFF] flex items-center justify-center shrink-0 mt-0.5 shadow-glow-sm">
-          <span className="text-[10px] font-bold text-white">A</span>
+        <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-aegis-primary to-aegis-accent flex items-center justify-center shrink-0 mt-0.5 shadow-glow-sm">
+          <span className="text-[10px] font-bold text-aegis-text">A</span>
         </div>
       )}
 
@@ -250,19 +250,15 @@ export const MessageBubble = memo(function MessageBubble({ message, onResend }: 
           className={clsx(
             'rounded-2xl px-4 py-2.5 relative',
             isUser
-              ? 'rounded-tl-md'
-              : 'rounded-tr-md',
-            isStreaming && 'border-[#4EC9B0]/30'
+              ? 'rounded-tl-md bg-aegis-primary/[0.12] border border-aegis-primary/20'
+              : 'rounded-tr-md bg-[rgb(var(--aegis-overlay)/0.04)] border border-[rgb(var(--aegis-overlay)/0.06)]',
+            isStreaming && 'border-aegis-primary/30'
           )}
-          style={isUser
-            ? { background: 'rgba(78, 201, 176, 0.12)', border: '1px solid rgba(78, 201, 176, 0.20)' }
-            : { background: 'rgba(255, 255, 255, 0.04)', border: '1px solid rgba(255, 255, 255, 0.06)' }
-          }
         >
           {/* Streaming shimmer */}
           {isStreaming && (
             <div className="absolute -top-px left-0 right-0 h-[2px] overflow-hidden rounded-full">
-              <div className="w-full h-full bg-gradient-to-r from-transparent via-[#4EC9B0]/50 to-transparent animate-shimmer bg-[length:200%_100%]" />
+              <div className="w-full h-full bg-gradient-to-r from-transparent via-aegis-primary/50 to-transparent animate-shimmer bg-[length:200%_100%]" />
             </div>
           )}
 
@@ -333,28 +329,28 @@ export const MessageBubble = memo(function MessageBubble({ message, onResend }: 
 
         {/* Footer — Time + Actions (more visible) */}
         <div className="flex items-center gap-2 mt-1 px-1 h-5">
-          <span className="text-[10px] text-white/25 font-mono">{timeStr}</span>
+          <span className="text-[10px] text-aegis-text-muted font-mono">{timeStr}</span>
 
           {showActions && !isStreaming && (
             <div className="flex items-center gap-0.5 animate-fade-in">
               <button
                 onClick={handleCopy}
-                className="p-1 rounded-md hover:bg-white/[0.06] transition-colors"
+                className="p-1 rounded-md hover:bg-[rgb(var(--aegis-overlay)/0.06)] transition-colors"
                 title={t('chat.copy')}
               >
                 {copied ? (
                   <Check size={11} className="text-emerald-400" />
                 ) : (
-                  <Copy size={11} className="text-white/25 hover:text-white/50" />
+                  <Copy size={11} className="text-aegis-text-muted hover:text-aegis-text-secondary" />
                 )}
               </button>
               {isUser && onResend && (
                 <button
                   onClick={() => onResend(cleanContent)}
-                  className="p-1 rounded-md hover:bg-white/[0.06] transition-colors"
+                  className="p-1 rounded-md hover:bg-[rgb(var(--aegis-overlay)/0.06)] transition-colors"
                   title={t('chat.resend')}
                 >
-                  <RotateCcw size={11} className="text-white/25 hover:text-white/50" />
+                  <RotateCcw size={11} className="text-aegis-text-muted hover:text-aegis-text-secondary" />
                 </button>
               )}
             </div>

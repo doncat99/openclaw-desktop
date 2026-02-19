@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Copy, Check } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════
-// Code Block — Dark theme matching AEGIS design
+// Code Block — Theme-aware (dark/light) matching AEGIS design
+// Uses CSS variables: --aegis-code-bg, --aegis-code-header
 // ═══════════════════════════════════════════════════════════
 
 interface CodeBlockProps {
@@ -12,26 +13,28 @@ interface CodeBlockProps {
   code: string;
 }
 
-// Force solid dark background — override any inherited light styles
-const customTheme = {
-  ...oneDark,
-  'pre[class*="language-"]': {
-    ...oneDark['pre[class*="language-"]'],
-    background: '#0d1117',
-    margin: 0,
-    padding: '1em',
-    borderRadius: 0,
-    fontSize: '0.87em',
-    direction: 'ltr' as const,
-    textAlign: 'left' as const,
-  },
-  'code[class*="language-"]': {
-    ...oneDark['code[class*="language-"]'],
-    background: 'transparent',
-    direction: 'ltr' as const,
-    textAlign: 'left' as const,
-  },
-};
+/** Build syntax theme from base (oneDark/oneLight) with AEGIS overrides */
+function buildTheme(base: Record<string, any>) {
+  return {
+    ...base,
+    'pre[class*="language-"]': {
+      ...base['pre[class*="language-"]'],
+      background: 'var(--aegis-code-bg)',
+      margin: 0,
+      padding: '1em',
+      borderRadius: 0,
+      fontSize: '0.87em',
+      direction: 'ltr' as const,
+      textAlign: 'left' as const,
+    },
+    'code[class*="language-"]': {
+      ...base['code[class*="language-"]'],
+      background: 'transparent',
+      direction: 'ltr' as const,
+      textAlign: 'left' as const,
+    },
+  };
+}
 
 export function CodeBlock({ language, code }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
@@ -44,18 +47,22 @@ export function CodeBlock({ language, code }: CodeBlockProps) {
 
   const displayLang = language || 'text';
 
+  // Pick syntax theme based on current theme
+  const isDark = !document.documentElement.classList.contains('light');
+  const theme = buildTheme(isDark ? oneDark : oneLight);
+
   return (
-    <div className="my-2 rounded-xl overflow-hidden border border-white/[0.08] group" dir="ltr"
-      style={{ background: '#0d1117' }}>
-      {/* Header — solid dark */}
-      <div className="flex items-center justify-between px-3.5 py-1.5 border-b border-white/[0.06]"
-        style={{ background: '#161b22' }}>
-        <span className="text-[10px] font-mono font-medium text-white/40 uppercase tracking-widest">
+    <div className="my-2 rounded-xl overflow-hidden border border-[rgb(var(--aegis-overlay)/0.08)] group" dir="ltr"
+      style={{ background: 'var(--aegis-code-bg)' }}>
+      {/* Header */}
+      <div className="flex items-center justify-between px-3.5 py-1.5 border-b border-[rgb(var(--aegis-overlay)/0.06)]"
+        style={{ background: 'var(--aegis-code-header)' }}>
+        <span className="text-[10px] font-mono font-medium text-aegis-text-muted uppercase tracking-widest">
           {displayLang}
         </span>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1.5 text-[10px] text-white/30 hover:text-white/60 transition-colors"
+          className="flex items-center gap-1.5 text-[10px] text-aegis-text-muted hover:text-aegis-text-secondary transition-colors"
           title="نسخ الكود"
         >
           {copied ? (
@@ -72,13 +79,13 @@ export function CodeBlock({ language, code }: CodeBlockProps) {
         </button>
       </div>
 
-      {/* Code — solid dark background */}
+      {/* Code */}
       <SyntaxHighlighter
         language={language || 'text'}
-        style={customTheme}
+        style={theme}
         showLineNumbers={code.split('\n').length > 3}
         lineNumberStyle={{
-          color: 'rgba(139, 124, 248, 0.15)',
+          color: 'rgb(var(--aegis-overlay) / 0.12)',
           fontSize: '0.78em',
           paddingRight: '1em',
           minWidth: '2.5em',
@@ -86,7 +93,7 @@ export function CodeBlock({ language, code }: CodeBlockProps) {
         }}
         wrapLongLines
         customStyle={{
-          background: '#0d1117',
+          background: 'var(--aegis-code-bg)',
           margin: 0,
         }}
       >

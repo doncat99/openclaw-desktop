@@ -33,11 +33,11 @@ export function AudioPlayer({ src, className }: AudioPlayerProps) {
       let filePath = src.replace('aegis-media:', '');
       setLoading(true);
 
-      // Sandbox /tmp/ paths → serve via Edge TTS HTTP server
-      // The file gets copied to D:\clawdbot-shared\voice\ (served at /audio/)
+      // Sandbox /tmp/ paths → serve via TTS HTTP server (port configurable via IPC)
       if (filePath.startsWith('/tmp/tts-') || filePath.startsWith('/tmp/')) {
         const fileName = filePath.split('/').pop();
-        const httpUrl = `http://localhost:5050/audio/${fileName}`;
+        const ttsPort = localStorage.getItem('aegis-tts-port') || '5050';
+        const httpUrl = `http://localhost:${ttsPort}/audio/${fileName}`;
         console.log('[AudioPlayer] 🔊 Resolving sandbox path via HTTP:', httpUrl);
 
         // Try HTTP fetch from Edge TTS server
@@ -60,12 +60,15 @@ export function AudioPlayer({ src, className }: AudioPlayerProps) {
         return;
       }
 
-      // Convert Docker/Linux path to Windows path for shared folder
-      // /host-d/clawdbot-shared/voice/file.mp3 → D:\clawdbot-shared\voice\file.mp3
-      if (filePath.startsWith('/host-d/')) {
-        filePath = 'D:\\' + filePath.slice(8).replace(/\//g, '\\');
-      } else if (filePath.startsWith('/host-c/')) {
-        filePath = 'C:\\' + filePath.slice(8).replace(/\//g, '\\');
+      // Convert Docker/Linux mount paths to native paths via IPC (platform-agnostic)
+      // These paths come from Docker container mounts and need native resolution
+      if (filePath.startsWith('/host-')) {
+        // Extract drive letter from mount prefix: /host-d/ → D:\, /host-c/ → C:\
+        const match = filePath.match(/^\/host-([a-z])\/(.*)/i);
+        if (match) {
+          const driveLetter = match[1].toUpperCase();
+          filePath = `${driveLetter}:\\${match[2].replace(/\//g, '\\')}`;
+        }
       }
 
       console.log('[AudioPlayer] Loading media via IPC:', filePath);

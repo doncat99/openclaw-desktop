@@ -5,7 +5,7 @@ import { AppLayout } from '@/components/Layout/AppLayout';
 import { DashboardPage } from '@/pages/Dashboard';
 import { ChatPage } from '@/pages/ChatPage';
 import { WorkshopPage } from '@/pages/Workshop';
-import { CostTrackerPage } from '@/pages/CostTracker';
+import { FullAnalyticsPage } from '@/pages/FullAnalytics';
 import { CronMonitorPage } from '@/pages/CronMonitor';
 import { AgentHubPage } from '@/pages/AgentHub';
 import { MemoryExplorerPage } from '@/pages/MemoryExplorer';
@@ -31,6 +31,10 @@ export default function App() {
     setIsTyping,
     setSessions,
     setTokenUsage,
+    setCurrentModel,
+    setCurrentThinking,
+    setAvailableModels,
+    manualModelOverride,
   } = useChatStore();
 
   // ── Auto-Pairing State ──
@@ -75,9 +79,73 @@ export default function App() {
         if (used > 0 || max > 0) {
           setTokenUsage({ contextTokens: used, maxTokens: max, percentage: pct, compactions: main.compactions ?? 0 });
         }
+        // Update model from polling ONLY if user hasn't manually selected one
+        if (main.model && !manualModelOverride) setCurrentModel(main.model);
+        // Always update thinking level from session
+        if (main.thinkingLevel !== undefined) setCurrentThinking(main.thinkingLevel ?? null);
       }
     } catch { /* silent */ }
   }, [setTokenUsage]);
+
+  // ── Load Available Models from Gateway ──
+  // Multi-strategy: config.get → agents.list + session → fallback
+  // Labels are formatted in TitleBar via formatModelName(), so we just store IDs.
+  const loadAvailableModels = useCallback(async () => {
+    // ── Strategy 1: config.get → agents.defaults.models (most reliable) ──
+    try {
+      const raw = await gateway.call('config.get', {});
+      // Response may be config directly OR wrapped: { config: {...} }
+      const config = raw?.agents?.defaults?.models ? raw : raw?.config;
+      const modelsSection: Record<string, any> = config?.agents?.defaults?.models ?? {};
+      const fromConfig = Object.entries(modelsSection)
+        .filter(([, cfg]: [string, any]) => cfg?.alias)
+        .map(([id, cfg]: [string, any]) => ({
+          id,
+          label: id,           // Raw — formatted in TitleBar
+          alias: cfg.alias as string,
+        }));
+      if (fromConfig.length > 0) {
+        console.log('[Models] Loaded from config.get:', fromConfig.length);
+        setAvailableModels(fromConfig);
+        return;
+      }
+    } catch (e) {
+      console.warn('[Models] config.get failed, trying agents.list:', e);
+    }
+
+    // ── Strategy 2: Collect unique models from agents + session ──
+    try {
+      const modelMap = new Map<string, { id: string; label: string; alias?: string }>();
+
+      // Main session model
+      const sessionsResult = await gateway.getSessions();
+      const sessions = Array.isArray(sessionsResult?.sessions) ? sessionsResult.sessions : [];
+      const main = sessions.find((s: any) => (s.key || '') === 'agent:main:main');
+      if (main?.model) modelMap.set(main.model, { id: main.model, label: main.model });
+
+      // Agent models
+      const agentsResult = await gateway.getAgents();
+      const agents = Array.isArray(agentsResult?.agents) ? agentsResult.agents : [];
+      for (const agent of agents) {
+        const modelId = agent?.model?.primary;
+        if (modelId && !modelMap.has(modelId)) {
+          modelMap.set(modelId, { id: modelId, label: modelId });
+        }
+      }
+
+      if (modelMap.size > 0) {
+        const fromAgents = [...modelMap.values()];
+        console.log('[Models] Loaded from agents/sessions:', fromAgents.length);
+        setAvailableModels(fromAgents);
+        return;
+      }
+    } catch (e) {
+      console.warn('[Models] agents.list failed:', e);
+    }
+
+    // ── Strategy 3: FALLBACK_MODELS in TitleBar ──
+    console.warn('[Models] All strategies failed — using hardcoded fallback');
+  }, [setAvailableModels]);
 
   // ── Gateway Setup ──
   useEffect(() => {
@@ -125,6 +193,7 @@ export default function App() {
           }
           loadSessions();
           loadTokenUsage();
+          loadAvailableModels();
           useNotificationStore.getState().addNotification({
             type: 'connection',
             title: 'متصل',
@@ -145,6 +214,19 @@ export default function App() {
 
     initConnection();
     notifications.requestPermission();
+
+    // Listen for model changes → refresh session metadata (maxTokens, contextTokens)
+    const handleModelChanged = () => loadTokenUsage();
+    window.addEventListener('aegis:model-changed', handleModelChanged);
+    return () => window.removeEventListener('aegis:model-changed', handleModelChanged);
+
+    // Apply saved theme on startup
+    const savedTheme = useSettingsStore.getState().theme;
+    if (savedTheme === 'light') {
+      document.documentElement.classList.add('light');
+    } else {
+      document.documentElement.classList.remove('light');
+    }
   }, []);
 
   const initConnection = async () => {
@@ -153,9 +235,10 @@ export default function App() {
         const config = await window.aegis.config.get();
         const wsUrl = config.gatewayUrl || config.gatewayWsUrl || 'ws://127.0.0.1:18789';
         const token = config.gatewayToken || '';
-        // Store HTTP URL for pairing flow
+        // Store HTTP URL for pairing flow + media resolution
         const httpUrl = wsUrl.replace(/^ws:/, 'http:').replace(/^wss:/, 'https:');
         setGatewayHttpUrl(httpUrl);
+        localStorage.setItem('aegis-gateway-http', httpUrl);
         if (!localStorage.getItem('aegis-language') && config.installerLanguage) {
           const lang = config.installerLanguage as 'ar' | 'en';
           changeLanguage(lang);
@@ -217,7 +300,8 @@ export default function App() {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/chat" element={<ChatPage />} />
             <Route path="/workshop" element={<WorkshopPage />} />
-            <Route path="/costs" element={<CostTrackerPage />} />
+            <Route path="/costs" element={<FullAnalyticsPage />} />
+            <Route path="/analytics" element={<FullAnalyticsPage />} />
             <Route path="/cron" element={<CronMonitorPage />} />
             <Route path="/agents" element={<AgentHubPage />} />
             <Route path="/memory" element={<MemoryExplorerPage />} />

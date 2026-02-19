@@ -8,7 +8,7 @@ const MAIN_SESSION = 'agent:main:main';
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   timestamp: string;
   isStreaming?: boolean;
@@ -19,6 +19,12 @@ export interface ChatMessage {
     content: string;
     fileName: string;
   }>;
+  // Tool call metadata (role === 'tool')
+  toolName?: string;
+  toolInput?: Record<string, any>;
+  toolOutput?: string;
+  toolStatus?: 'running' | 'done' | 'error';
+  toolDurationMs?: number;
 }
 
 export interface Session {
@@ -67,6 +73,22 @@ interface ChatState {
   tokenUsage: TokenUsage | null;
   setTokenUsage: (usage: TokenUsage | null) => void;
 
+  // Current model (live from gateway)
+  currentModel: string | null;
+  setCurrentModel: (model: string | null) => void;
+
+  // Manual model override — set when user picks manually, prevents polling from overwriting
+  manualModelOverride: string | null;
+  setManualModelOverride: (model: string | null) => void;
+
+  // Current thinking level (live from gateway session)
+  currentThinking: string | null;
+  setCurrentThinking: (level: string | null) => void;
+
+  // Available models (fetched from gateway models.list)
+  availableModels: Array<{ id: string; label: string; alias?: string }>;
+  setAvailableModels: (models: Array<{ id: string; label: string; alias?: string }>) => void;
+
   // Drafts (per-session)
   drafts: Record<string, string>;
   setDraft: (key: string, text: string) => void;
@@ -79,6 +101,9 @@ interface ChatState {
   setIsSending: (sending: boolean) => void;
   isLoadingHistory: boolean;
   setIsLoadingHistory: (loading: boolean) => void;
+  // Called by MessageInput before first send — loads history if not yet loaded
+  historyLoader: (() => Promise<void>) | null;
+  setHistoryLoader: (fn: (() => Promise<void>) | null) => void;
 
   // Connection
   connected: boolean;
@@ -245,6 +270,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // ── Token Usage ──
   tokenUsage: null,
   setTokenUsage: (usage) => set({ tokenUsage: usage }),
+  currentModel: null,
+  setCurrentModel: (model) => set({ currentModel: model }),
+  manualModelOverride: null,
+  setManualModelOverride: (model) => set({ manualModelOverride: model, currentModel: model }),
+  currentThinking: null,
+  setCurrentThinking: (level) => set({ currentThinking: level }),
+
+  // ── Available Models ──
+  availableModels: [],
+  setAvailableModels: (models) => set({ availableModels: models }),
 
   // ── UI State ──
   isTyping: false,
@@ -253,6 +288,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setIsSending: (sending) => set({ isSending: sending }),
   isLoadingHistory: false,
   setIsLoadingHistory: (loading) => set({ isLoadingHistory: loading }),
+  historyLoader: null,
+  setHistoryLoader: (fn) => set({ historyLoader: fn }),
 
   // ── Drafts ──
   drafts: {},

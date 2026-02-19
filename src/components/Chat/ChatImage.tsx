@@ -32,8 +32,9 @@ function resolveImageSrc(src: string): string {
 
   // Relative gateway media path (e.g., /media/xxx.png)
   if (src.startsWith('/media/') || src.startsWith('/v1/media/')) {
-    // Resolve against gateway URL
-    return `http://localhost:18789${src}`;
+    // Resolve against gateway URL (read from config, fallback to localhost)
+    const gwUrl = localStorage.getItem('aegis-gateway-http') || 'http://127.0.0.1:18789';
+    return `${gwUrl}${src}`;
   }
 
   return src;
@@ -144,30 +145,30 @@ function Lightbox({ src, alt, onClose }: LightboxProps) {
       {/* Top bar */}
       <div className="absolute top-0 left-0 right-0 h-12 flex items-center justify-between px-4 z-10"
         style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.6), transparent)' }}>
-        <span className="text-[12px] text-white/40 font-mono">
+        <span className="text-[12px] text-aegis-text-muted font-mono">
           {alt || 'Image'} — {Math.round(zoom * 100)}%
         </span>
         <div className="flex items-center gap-1">
           <button onClick={() => setZoom(z => Math.min(z + 0.25, 5))}
-            className="p-2 rounded-lg hover:bg-white/10 text-white/50 hover:text-white/80 transition-all" title="Zoom in">
+            className="p-2 rounded-lg hover:bg-[rgb(var(--aegis-overlay)/0.1)] text-aegis-text-secondary hover:text-aegis-text transition-all" title="Zoom in">
             <ZoomIn size={16} />
           </button>
           <button onClick={() => setZoom(z => Math.max(z - 0.25, 0.25))}
-            className="p-2 rounded-lg hover:bg-white/10 text-white/50 hover:text-white/80 transition-all" title="Zoom out">
+            className="p-2 rounded-lg hover:bg-[rgb(var(--aegis-overlay)/0.1)] text-aegis-text-secondary hover:text-aegis-text transition-all" title="Zoom out">
             <ZoomOut size={16} />
           </button>
           <button onClick={() => setRotation(r => r + 90)}
-            className="p-2 rounded-lg hover:bg-white/10 text-white/50 hover:text-white/80 transition-all" title="Rotate">
+            className="p-2 rounded-lg hover:bg-[rgb(var(--aegis-overlay)/0.1)] text-aegis-text-secondary hover:text-aegis-text transition-all" title="Rotate">
             <RotateCw size={16} />
           </button>
-          <div className="w-px h-5 bg-white/10 mx-1" />
+          <div className="w-px h-5 bg-[rgb(var(--aegis-overlay)/0.1)] mx-1" />
           <button onClick={handleSave}
-            className="p-2 rounded-lg hover:bg-white/10 text-white/50 hover:text-white/80 transition-all" title="Save">
+            className="p-2 rounded-lg hover:bg-[rgb(var(--aegis-overlay)/0.1)] text-aegis-text-secondary hover:text-aegis-text transition-all" title="Save">
             <Download size={16} />
           </button>
-          <div className="w-px h-5 bg-white/10 mx-1" />
+          <div className="w-px h-5 bg-[rgb(var(--aegis-overlay)/0.1)] mx-1" />
           <button onClick={onClose}
-            className="p-2 rounded-lg hover:bg-white/10 text-white/50 hover:text-white/80 transition-all" title="Close (Esc)">
+            className="p-2 rounded-lg hover:bg-[rgb(var(--aegis-overlay)/0.1)] text-aegis-text-secondary hover:text-aegis-text transition-all" title="Close (Esc)">
             <X size={16} />
           </button>
         </div>
@@ -193,7 +194,7 @@ function Lightbox({ src, alt, onClose }: LightboxProps) {
       />
 
       {/* Bottom hint */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[11px] text-white/20 select-none">
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[11px] text-aegis-text-dim select-none">
         Scroll to zoom · Drag to pan · R to rotate · 0 to reset · Esc to close
       </div>
     </div>
@@ -238,7 +239,7 @@ export function ChatImage({ src, alt, maxWidth = '100%', maxHeight = '400px', cl
         <img
           src={resolvedSrc}
           alt={alt || ''}
-          className="rounded-xl border border-white/[0.08] cursor-pointer transition-all hover:border-white/[0.15]"
+          className="rounded-xl border border-[rgb(var(--aegis-overlay)/0.08)] cursor-pointer transition-all hover:border-[rgb(var(--aegis-overlay)/0.15)]"
           style={{ maxWidth, maxHeight, display: loaded ? 'block' : 'none' }}
           loading="lazy"
           onLoad={() => setLoaded(true)}
@@ -248,9 +249,9 @@ export function ChatImage({ src, alt, maxWidth = '100%', maxHeight = '400px', cl
 
         {/* Loading placeholder */}
         {!loaded && !error && (
-          <span className="rounded-xl border border-white/[0.08] flex items-center justify-center"
-            style={{ display: 'inline-flex', width: 200, height: 150, background: 'rgba(255,255,255,0.03)' }}>
-            <span className="w-5 h-5 border-2 border-white/10 border-t-white/30 rounded-full animate-spin" style={{ display: 'inline-block' }} />
+          <span className="rounded-xl border border-[rgb(var(--aegis-overlay)/0.08)] flex items-center justify-center"
+            style={{ display: 'inline-flex', width: 200, height: 150, background: 'rgb(var(--aegis-overlay) / 0.03)' }}>
+            <span className="w-5 h-5 border-2 border-[rgb(var(--aegis-overlay)/0.1)] border-t-white/30 rounded-full animate-spin" style={{ display: 'inline-block' }} />
           </span>
         )}
 
@@ -260,25 +261,25 @@ export function ChatImage({ src, alt, maxWidth = '100%', maxHeight = '400px', cl
             <button
               onClick={handleSave}
               className="p-1.5 rounded-lg backdrop-blur-sm transition-all"
-              style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.1)' }}
+              style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgb(var(--aegis-overlay) / 0.1)' }}
               title="حفظ الصورة"
             >
-              <Download size={14} className="text-white/70 hover:text-white" />
+              <Download size={14} className="text-aegis-text hover:text-white" />
             </button>
             <button
               onClick={handleExpand}
               className="p-1.5 rounded-lg backdrop-blur-sm transition-all"
-              style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.1)' }}
+              style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgb(var(--aegis-overlay) / 0.1)' }}
               title="تكبير"
             >
-              <Maximize2 size={14} className="text-white/70 hover:text-white" />
+              <Maximize2 size={14} className="text-aegis-text hover:text-white" />
             </button>
           </span>
         )}
 
         {/* Alt text */}
         {alt && alt !== 'image' && alt !== 'مرفق' && (
-          <span className="text-[11px] text-white/25 mt-1" style={{ display: 'block' }}>{alt}</span>
+          <span className="text-[11px] text-aegis-text-muted mt-1" style={{ display: 'block' }}>{alt}</span>
         )}
       </span>
 

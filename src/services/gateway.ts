@@ -8,6 +8,9 @@
 // ═══════════════════════════════════════════════════════════
 
 import { useWorkshopStore, Task } from '@/stores/workshopStore';
+import { startPolling, stopPolling, handleGatewayEvent } from '@/stores/gatewayDataStore';
+import { useChatStore } from '@/stores/chatStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 
 // ── Workshop Command Parser ──
 // Parses [[workshop:action ...]] commands from agent messages
@@ -109,7 +112,7 @@ export interface ChatMessage {
 // ── AEGIS Desktop Client Context ──
 // Injected with the FIRST message only — tells the agent about Desktop capabilities
 const AEGIS_DESKTOP_CONTEXT = `[AEGIS_DESKTOP_CONTEXT]
-You are connected via AEGIS Desktop v5.0 — an Electron-based chat client with rich capabilities.
+You are connected via AEGIS Desktop v5.1 — an Electron-based chat client with rich capabilities.
 This context is injected once at conversation start. Do NOT repeat or reference it to the user.
 
 CAPABILITIES:
@@ -347,6 +350,7 @@ class GatewayService {
     this.ws.onclose = (event) => {
       console.log('[GW] Closed:', event.code, event.reason);
       this.stopHeartbeat();
+      stopPolling();
       this.connected = false;
       this.connecting = false;
       this.ws = null;
@@ -402,6 +406,8 @@ class GatewayService {
           this.reconnectAttempt = 0;
           this.startHeartbeat();
           this.emitStatus();
+          // Start central data polling
+          startPolling(this);
           // Flush any messages queued while disconnected
           this.flushQueue();
         } else {
@@ -453,7 +459,7 @@ class GatewayService {
         maxProtocol: 3,
         client: {
           id: clientId,
-          version: '5.0.0',
+          version: '5.1.0',
           platform: 'windows',
           mode: clientMode,
         },
@@ -465,7 +471,7 @@ class GatewayService {
         auth: { token: this.token },
         device,
         locale: 'ar-SA',
-        userAgent: 'aegis-desktop/5.0.0',
+        userAgent: 'aegis-desktop/5.1.0',
       },
     });
   }
@@ -543,10 +549,52 @@ class GatewayService {
     return this.request('chat.abort', { sessionKey });
   }
 
+  /** Override the model for a specific session (per-session, not permanent). */
+  async setSessionModel(model: string, sessionKey = 'agent:main:main'): Promise<any> {
+    return this.request('sessions.patch', { key: sessionKey, model });
+  }
+
+  /** Override thinking level for a session (null = reset to default). */
+  async setSessionThinking(level: string | null, sessionKey = 'agent:main:main'): Promise<any> {
+    return this.request('sessions.patch', { key: sessionKey, thinkingLevel: level });
+  }
+
+  /** Update an agent's extra params (e.g. context1m). */
+  async updateAgentParams(agentId: string, extraParams: Record<string, any>): Promise<any> {
+    return this.request('agents.update', { agentId, extraParams });
+  }
+
   // ── Session Status (token usage) ──
 
   async getSessionStatus(sessionKey = 'agent:main:main'): Promise<any> {
     return this.request('sessions.list', {});
+  }
+
+  // ── Cost & Usage ──
+
+  async getAvailableModels(): Promise<any> {
+    return this.request('models.list', {});
+  }
+
+  /** Public gateway RPC — use for one-off calls not covered by dedicated methods */
+  async call(method: string, params: any = {}): Promise<any> {
+    return this.request(method, params);
+  }
+
+  async getCostSummary(days = 30): Promise<any> {
+    return this.request('usage.cost', { days });
+  }
+
+  async getSessionsUsage(params: { limit?: number; startDate?: string; endDate?: string; key?: string } = {}): Promise<any> {
+    return this.request('sessions.usage', { limit: 50, ...params });
+  }
+
+  async getSessionTimeseries(key: string): Promise<any> {
+    return this.request('sessions.usage.timeseries', { key });
+  }
+
+  async getSessionLogs(key: string, limit = 200): Promise<any> {
+    return this.request('sessions.usage.logs', { key, limit });
   }
 
   // ── Generic RPC call (for cron, tools, etc.) ──
@@ -632,6 +680,104 @@ class GatewayService {
   }
 
   // ═══════════════════════════════════════════════════════════
+  // Tool Stream Handler — real-time tool execution display
+  //
+  // Gateway sends: { type:"event", event:"chat", payload: {
+  //   stream: "tool",
+  //   runId, sessionKey?, ts?,
+  //   data: {
+  //     toolCallId: string,
+  //     name: string,
+  //     phase: "start" | "update" | "result",
+  //     args?: Record<string,any>,        // when phase==="start"
+  //     partialResult?: string | object,   // when phase==="update"
+  //     result?: string | object,          // when phase==="result"
+  //   }
+  // }}
+  // ═══════════════════════════════════════════════════════════
+  private handleToolStream(payload: any) {
+    // Only process when Tool Intent View is enabled in settings
+    if (!useSettingsStore.getState().toolIntentEnabled) return;
+
+    const data = payload.data ?? {};
+    const toolCallId = typeof data.toolCallId === 'string' ? data.toolCallId : '';
+    if (!toolCallId) return;
+
+    const toolName = typeof data.name === 'string' ? data.name : 'tool';
+    const phase    = typeof data.phase === 'string' ? data.phase : '';
+    const msgId    = `tool-live-${toolCallId}`;
+
+    const store = useChatStore.getState();
+
+    if (phase === 'start') {
+      // Tool is starting — add a 'running' card (idempotent)
+      if (!store.messages.some((m) => m.id === msgId)) {
+        const toolInput = data.args && typeof data.args === 'object' ? data.args : {};
+        store.addMessage({
+          id: msgId,
+          role: 'tool',
+          content: '',
+          toolName,
+          toolInput,
+          toolStatus: 'running',
+          timestamp: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+
+    if (phase === 'update') {
+      // Partial result streaming — update existing card
+      const partial = data.partialResult != null
+        ? (typeof data.partialResult === 'string' ? data.partialResult : JSON.stringify(data.partialResult))
+        : '';
+      const msgs = store.messages;
+      const idx  = msgs.findIndex((m) => m.id === msgId);
+      if (idx >= 0) {
+        const updated = [...msgs];
+        updated[idx] = { ...updated[idx], toolOutput: partial.slice(0, 2000) };
+        store.setMessages(updated);
+      }
+      return;
+    }
+
+    if (phase === 'result') {
+      // Tool complete — finalize with output + duration
+      const output = data.result != null
+        ? (typeof data.result === 'string' ? data.result : JSON.stringify(data.result))
+        : '';
+      const msgs = store.messages;
+      const idx  = msgs.findIndex((m) => m.id === msgId);
+      if (idx >= 0) {
+        const updated = [...msgs];
+        const startTs = typeof payload.ts === 'number' ? payload.ts : 0;
+        const durationMs = startTs > 0 ? Date.now() - startTs : undefined;
+        updated[idx] = {
+          ...updated[idx],
+          toolOutput: output.slice(0, 2000),
+          toolStatus: 'done',
+          ...(durationMs !== undefined ? { toolDurationMs: durationMs } : {}),
+        };
+        store.setMessages(updated);
+      } else {
+        // No 'start' event received — add result card directly
+        store.addMessage({
+          id: msgId,
+          role: 'tool',
+          content: '',
+          toolName,
+          toolOutput: output.slice(0, 2000),
+          toolStatus: 'done',
+          timestamp: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+
+    console.log('[GW] Tool stream — unknown phase:', phase, toolCallId);
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // Event Handler — OpenClaw Protocol
   //
   // Gateway sends: { type:"event", event:"chat", payload: {
@@ -647,9 +793,9 @@ class GatewayService {
     const event = msg.event || '';
     const p = msg.payload || {};
 
-    // Only handle "chat" events
+    // Non-chat events → forward to central data store
     if (event !== 'chat') {
-      console.log('[GW] Non-chat event:', event);
+      handleGatewayEvent(event, p);
       return;
     }
 
@@ -660,6 +806,16 @@ class GatewayService {
       console.log('[GW] Ignoring event from isolated session:', sessionKey);
       return;
     }
+
+    // ── Tool stream events (real-time tool execution) ──
+    // payload.stream === "tool" → tool call lifecycle events (start/update/result)
+    if (p.stream === 'tool') {
+      this.handleToolStream(p);
+      return;
+    }
+
+    // Compaction stream — handled via tokenUsage.compactions counter polling
+    if (p.stream === 'compaction') return;
 
     const state = p.state || '';
     const runId = p.runId || '';

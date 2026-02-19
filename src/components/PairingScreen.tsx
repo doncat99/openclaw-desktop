@@ -163,7 +163,7 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
         <div
           className="absolute inset-0"
           style={{
-            backgroundImage: 'radial-gradient(circle at 25% 25%, #4EC9B0 1px, transparent 1px)',
+            backgroundImage: 'radial-gradient(circle at 25% 25%, rgb(var(--aegis-primary)) 1px, transparent 1px)',
             backgroundSize: '40px 40px',
           }}
         />
@@ -172,7 +172,7 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
       {/* Main card */}
       <div className="relative w-full max-w-md mx-4 rounded-2xl bg-[#12121e] border border-[#1e1e30] shadow-2xl overflow-hidden">
         {/* Top gradient bar */}
-        <div className="h-1 bg-gradient-to-r from-[#4EC9B0] via-[#6C9FFF] to-[#4EC9B0]" />
+        <div className="h-1 bg-gradient-to-r from-aegis-primary via-aegis-accent to-aegis-primary" />
 
         {/* Cancel button */}
         <button
@@ -191,7 +191,7 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
               ? 'bg-emerald-500/20 text-emerald-400'
               : state === 'error'
                 ? 'bg-red-500/20 text-red-400'
-                : 'bg-[#4EC9B0]/20 text-[#4EC9B0]'}
+                : 'bg-aegis-primary/20 text-aegis-primary'}
             transition-colors duration-500
           `}>
             {state === 'approved' ? (
@@ -206,7 +206,7 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
           </div>
 
           {/* Title */}
-          <h2 className="text-xl font-bold text-white mb-2">
+          <h2 className="text-xl font-bold text-aegis-text mb-2">
             {state === 'approved'
               ? (isRTL ? 'تم الربط بنجاح!' : 'Paired Successfully!')
               : state === 'error'
@@ -235,7 +235,7 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
               {/* Code display */}
               <div className={`
                 py-4 px-6 rounded-xl bg-[#0a0a14] border-2 transition-colors duration-500
-                ${state === 'approved' ? 'border-emerald-500/50' : 'border-[#4EC9B0]/30'}
+                ${state === 'approved' ? 'border-emerald-500/50' : 'border-aegis-primary/30'}
               `}>
                 <span className="text-4xl font-mono font-bold tracking-[0.3em] text-white select-all">
                   {code}
@@ -246,7 +246,7 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
               {state === 'waiting' && (
                 <div className="mt-5 space-y-2 text-start">
                   <p className="text-xs text-gray-500 flex items-center gap-2">
-                    <ShieldCheck size={14} className="text-[#4EC9B0] shrink-0" />
+                    <ShieldCheck size={14} className="text-aegis-primary shrink-0" />
                     <span>
                       {isRTL
                         ? 'افتح Terminal وشغّل: openclaw gateway approve'
@@ -254,7 +254,7 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
                     </span>
                   </p>
                   <p className="text-xs text-gray-500 flex items-center gap-2">
-                    <ShieldCheck size={14} className="text-[#4EC9B0] shrink-0" />
+                    <ShieldCheck size={14} className="text-aegis-primary shrink-0" />
                     <span>
                       {isRTL
                         ? 'أو وافق من واجهة OpenClaw الرئيسية'
@@ -267,7 +267,7 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
               {/* Polling indicator */}
               {state === 'waiting' && (
                 <div className="mt-4 flex items-center justify-center gap-2 text-xs text-gray-500">
-                  <Loader2 size={12} className="animate-spin text-[#4EC9B0]" />
+                  <Loader2 size={12} className="animate-spin text-aegis-primary" />
                   <span>{isRTL ? 'في انتظار الموافقة...' : 'Waiting for approval...'}</span>
                 </div>
               )}
@@ -277,7 +277,7 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
           {/* Requesting state */}
           {state === 'requesting' && (
             <div className="my-6 flex items-center gap-2 text-sm text-gray-400">
-              <Loader2 size={16} className="animate-spin text-[#4EC9B0]" />
+              <Loader2 size={16} className="animate-spin text-aegis-primary" />
               <span>{isRTL ? 'جاري طلب الربط...' : 'Requesting pairing...'}</span>
             </div>
           )}
@@ -296,7 +296,7 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
               <button
                 onClick={requestPairing}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl
-                  bg-[#4EC9B0] hover:bg-[#3db89f] text-black font-semibold text-sm
+                  bg-aegis-primary hover:bg-[#3db89f] text-black font-semibold text-sm
                   transition-colors"
               >
                 <RefreshCw size={16} />

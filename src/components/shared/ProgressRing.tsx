@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import clsx from 'clsx';
+import { themeHex } from '@/utils/theme-colors';
 
 interface ProgressRingProps {
   /** 0–100 */
@@ -13,17 +14,11 @@ interface ProgressRingProps {
   className?: string;
 }
 
-// Threshold-based auto-coloring
-const AUTO_COLORS = {
-  danger: '#F47067',
-  warning: '#E8B84E',
-  primary: '#4EC9B0',
-} as const;
-
+/** Threshold-based auto-coloring — reads theme at call time */
 function getAutoColor(pct: number): string {
-  if (pct > 85) return AUTO_COLORS.danger;
-  if (pct > 60) return AUTO_COLORS.warning;
-  return AUTO_COLORS.primary;
+  if (pct > 85) return themeHex('danger');
+  if (pct > 60) return themeHex('warning');
+  return themeHex('primary');
 }
 
 /**

@@ -2,7 +2,7 @@
 // SettingsPage — Full settings with Gateway, Theme, Model
 // ═══════════════════════════════════════════════════════════
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Settings, Bell, BellOff, Globe, Volume2, VolumeX,
@@ -13,6 +13,7 @@ import { PageTransition } from '@/components/shared/PageTransition';
 import { StatusDot } from '@/components/shared/StatusDot';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useChatStore } from '@/stores/chatStore';
+import { useGatewayDataStore } from '@/stores/gatewayDataStore';
 import { gateway } from '@/services/gateway';
 import { notifications } from '@/services/notifications';
 import { changeLanguage } from '@/i18n';
@@ -22,6 +23,7 @@ export function SettingsPageFull() {
   const { t } = useTranslation();
   const {
     language, setLanguage,
+    theme, setTheme,
     notificationsEnabled, setNotificationsEnabled,
     soundEnabled, setSoundEnabled,
     dndMode, setDndMode,
@@ -29,25 +31,16 @@ export function SettingsPageFull() {
     memoryMode, setMemoryMode,
     memoryApiUrl, setMemoryApiUrl,
     memoryLocalPath, setMemoryLocalPath,
+    context1mEnabled, setContext1mEnabled,
+    toolIntentEnabled, setToolIntentEnabled,
   } = useSettingsStore();
   const { connected, connecting } = useChatStore();
+  const sessions = useGatewayDataStore((s) => s.sessions);
 
-  const [sessions, setSessions] = useState<any[]>([]);
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<'success' | 'fail' | null>(null);
 
-  // Load sessions for model info
-  const loadSessions = useCallback(async () => {
-    if (!connected) return;
-    try {
-      const result = await gateway.getSessions();
-      setSessions(Array.isArray(result?.sessions) ? result.sessions : []);
-    } catch { /* silent */ }
-  }, [connected]);
-
-  useEffect(() => { loadSessions(); }, [loadSessions]);
-
-  const mainSession = sessions.find((s: any) => (s.key || '') === 'agent:main:main');
+  const mainSession = sessions.find((s) => (s.key || '') === 'agent:main:main');
   const mainModel = mainSession?.model || '—';
   const contextTokens = mainSession?.contextTokens || 0;
 
@@ -69,6 +62,21 @@ export function SettingsPageFull() {
   const handleDndToggle = (dnd: boolean) => {
     setDndMode(dnd);
     notifications.setDndMode(dnd);
+  };
+
+  const [context1mSaving, setContext1mSaving] = useState(false);
+
+  const handleContext1mToggle = async (enabled: boolean) => {
+    setContext1mEnabled(enabled);
+    setContext1mSaving(true);
+    try {
+      // Apply to main agent via agents.update extraParams
+      await gateway.updateAgentParams('main', { context1m: enabled || undefined });
+    } catch (err) {
+      console.error('[Settings] Failed to update context1m:', err);
+    } finally {
+      setContext1mSaving(false);
+    }
   };
 
   const handleTestConnection = async () => {
@@ -99,23 +107,31 @@ export function SettingsPageFull() {
     } catch { /* silent */ }
   };
 
-  // Toggle switch — conceptual design style with glow
-  const Toggle = ({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) => (
+  // Toggle switch — unified design (used everywhere in settings)
+  const Toggle = ({
+    enabled,
+    onChange,
+    disabled,
+  }: {
+    enabled: boolean;
+    onChange: (v: boolean) => void;
+    disabled?: boolean;
+  }) => (
     <button
-      onClick={() => onChange(!enabled)}
+      onClick={() => !disabled && onChange(!enabled)}
       className={clsx(
         'w-[42px] h-[24px] rounded-full relative transition-all shrink-0 border',
         enabled
           ? 'bg-aegis-primary/30 border-aegis-primary/40'
-          : 'bg-white/[0.08] border-white/[0.1]'
+          : 'bg-[rgb(var(--aegis-overlay)/0.08)] border-[rgb(var(--aegis-overlay)/0.1)]',
+        disabled && 'opacity-50 cursor-not-allowed'
       )}
     >
       <div className={clsx(
         'absolute top-[2px] w-[18px] h-[18px] rounded-full transition-all duration-300',
-        'cubic-bezier(0.22, 1, 0.36, 1)',
         enabled
           ? 'left-[21px] bg-aegis-primary shadow-[0_0_8px_rgba(78,201,176,0.5)]'
-          : 'left-[2px] bg-white/30'
+          : 'left-[2px] bg-[rgb(var(--aegis-overlay)/0.3)]'
       )} />
     </button>
   );
@@ -137,18 +153,26 @@ export function SettingsPageFull() {
         </h3>
         <div className="flex items-center gap-3">
           <button
-            className="flex-1 py-3 rounded-xl text-[14px] font-medium border bg-aegis-primary/15 border-aegis-primary/30 text-aegis-primary"
+            onClick={() => { setTheme('dark'); document.documentElement.classList.remove('light'); }}
+            className={clsx(
+              'flex-1 py-3 rounded-xl text-[14px] font-medium border transition-colors',
+              theme === 'dark'
+                ? 'bg-aegis-primary/15 border-aegis-primary/30 text-aegis-primary'
+                : 'border-aegis-border text-aegis-text-dim hover:border-aegis-border-hover'
+            )}
           >
             🌙 Dark Mode
           </button>
           <button
-            disabled
-            className="flex-1 py-3 rounded-xl text-[14px] font-medium border border-aegis-border/20 text-aegis-text-dim/40 relative"
+            onClick={() => { setTheme('light'); document.documentElement.classList.add('light'); }}
+            className={clsx(
+              'flex-1 py-3 rounded-xl text-[14px] font-medium border transition-colors',
+              theme === 'light'
+                ? 'bg-aegis-primary/15 border-aegis-primary/30 text-aegis-primary'
+                : 'border-aegis-border text-aegis-text-dim hover:border-aegis-border-hover'
+            )}
           >
             ☀️ Light Mode
-            <span className="absolute -top-2 right-2 text-[9px] bg-aegis-surface/60 border border-aegis-border/20 px-1.5 py-0.5 rounded-full text-aegis-text-dim">
-              {t('common.soon', 'قريباً')}
-            </span>
           </button>
         </div>
       </GlassCard>
@@ -254,7 +278,7 @@ export function SettingsPageFull() {
           {/* Gateway URL */}
           <div className="flex items-center justify-between">
             <div className="text-[13px] text-aegis-text">URL</div>
-            <span className="text-[11px] font-mono text-aegis-text-dim">ws://127.0.0.1:18789</span>
+            <span className="text-[11px] font-mono text-aegis-text-dim">{localStorage.getItem('aegis-gateway-http')?.replace('http', 'ws') || 'ws://127.0.0.1:18789'}</span>
           </div>
 
           {/* Buttons */}
@@ -342,7 +366,7 @@ export function SettingsPageFull() {
               <span className="text-[12px] text-aegis-text-muted">{desc}</span>
               <kbd
                 className="text-[10px] font-mono px-2 py-1 rounded"
-                style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.12)' }}
+                style={{ background: 'rgb(var(--aegis-overlay) / 0.08)', color: 'rgb(var(--aegis-text-muted))', border: '1px solid var(--aegis-border-hover)' }}
               >{key}</kbd>
             </div>
           ))}
@@ -357,24 +381,48 @@ export function SettingsPageFull() {
           <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20">BETA</span>
         </h3>
 
+        {/* 1M Context Toggle */}
+        <div className="flex items-center justify-between py-3 border-b border-aegis-border/10">
+          <div>
+            <div className="text-[13px] text-aegis-text font-medium flex items-center gap-2">
+              1M Context Window
+              {context1mSaving && <Loader2 size={11} className="animate-spin text-aegis-text-dim" />}
+            </div>
+            <div className="text-[11px] text-aegis-text-dim/60 mt-0.5">
+              تفعيل Anthropic 1M context beta لـ Opus / Sonnet — يزيد السياق لـ 1,000,000 token
+            </div>
+          </div>
+          <Toggle
+            enabled={context1mEnabled}
+            onChange={(v) => handleContext1mToggle(v)}
+            disabled={context1mSaving}
+          />
+        </div>
+
+        {/* Tool Intent View Toggle */}
+        <div className="flex items-center justify-between py-3 border-b border-aegis-border/10">
+          <div>
+            <div className="text-[13px] text-aegis-text font-medium">🔧 Tool Intent View</div>
+            <div className="text-[11px] text-aegis-text-dim/60 mt-0.5">
+              عرض tool calls في الشات كـ cards مع الـ input/output — مخفية افتراضياً
+            </div>
+          </div>
+          <Toggle
+            enabled={toolIntentEnabled}
+            onChange={(v) => setToolIntentEnabled(v)}
+          />
+        </div>
+
         {/* Memory Explorer Toggle */}
         <div className="flex items-center justify-between py-3 border-b border-aegis-border/10">
           <div>
             <div className="text-[13px] text-aegis-text font-medium">{t('settings.memoryExplorer', 'Memory Explorer')}</div>
             <div className="text-[11px] text-aegis-text-dim/60 mt-0.5">{t('settings.memoryExplorerDesc', 'Browse and search memories via API server or local .md files')}</div>
           </div>
-          <button
-            onClick={() => setMemoryExplorerEnabled(!memoryExplorerEnabled)}
-            className={clsx(
-              'relative w-10 h-5 rounded-full transition-colors',
-              memoryExplorerEnabled ? 'bg-aegis-primary' : 'bg-aegis-surface-alt'
-            )}
-          >
-            <div className={clsx(
-              'absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform',
-              memoryExplorerEnabled ? 'translate-x-5' : 'translate-x-0.5'
-            )} />
-          </button>
+          <Toggle
+            enabled={memoryExplorerEnabled}
+            onChange={(v) => setMemoryExplorerEnabled(v)}
+          />
         </div>
 
         {/* Memory Config */}
@@ -387,8 +435,10 @@ export function SettingsPageFull() {
                 <button
                   onClick={() => setMemoryMode('local')}
                   className={clsx(
-                    'flex-1 py-2 rounded-lg text-[12px] font-medium border transition-colors',
-                    memoryMode === 'local' ? 'bg-aegis-primary/15 border-aegis-primary/30 text-aegis-primary' : 'border-aegis-border/20 text-aegis-text-dim/40'
+                    'flex-1 py-1.5 rounded-lg text-[11px] font-medium border transition-all duration-150',
+                    memoryMode === 'local'
+                      ? 'bg-[rgb(var(--aegis-primary)/0.1)] border-[rgb(var(--aegis-primary)/0.25)] text-aegis-primary'
+                      : 'bg-transparent border-[rgb(var(--aegis-overlay)/0.08)] text-aegis-text-dim hover:border-[rgb(var(--aegis-overlay)/0.15)] hover:text-aegis-text-muted'
                   )}
                 >
                   📁 {t('settings.memoryLocal', 'Local Files')}
@@ -396,8 +446,10 @@ export function SettingsPageFull() {
                 <button
                   onClick={() => setMemoryMode('api')}
                   className={clsx(
-                    'flex-1 py-2 rounded-lg text-[12px] font-medium border transition-colors',
-                    memoryMode === 'api' ? 'bg-aegis-primary/15 border-aegis-primary/30 text-aegis-primary' : 'border-aegis-border/20 text-aegis-text-dim/40'
+                    'flex-1 py-1.5 rounded-lg text-[11px] font-medium border transition-all duration-150',
+                    memoryMode === 'api'
+                      ? 'bg-[rgb(var(--aegis-primary)/0.1)] border-[rgb(var(--aegis-primary)/0.25)] text-aegis-primary'
+                      : 'bg-transparent border-[rgb(var(--aegis-overlay)/0.08)] text-aegis-text-dim hover:border-[rgb(var(--aegis-overlay)/0.15)] hover:text-aegis-text-muted'
                   )}
                 >
                   🔌 {t('settings.memoryApi', 'API Server')}
@@ -415,7 +467,8 @@ export function SettingsPageFull() {
                     value={memoryLocalPath}
                     readOnly
                     placeholder={t('settings.memoryPathPlaceholder', 'Select folder...')}
-                    className="flex-1 bg-aegis-bg/50 border border-aegis-border/20 rounded-lg px-3 py-2 text-[12px] font-mono text-aegis-text placeholder:text-aegis-text-dim/30 focus:outline-none"
+                    className="flex-1 bg-[rgb(var(--aegis-overlay)/0.05)] border border-[rgb(var(--aegis-overlay)/0.1)] rounded-lg px-3 py-2 text-[12px] font-mono text-aegis-text placeholder:text-aegis-text-dim/30 focus:outline-none"
+                    style={{ colorScheme: 'dark' }}
                   />
                   <button
                     onClick={async () => {
@@ -440,7 +493,8 @@ export function SettingsPageFull() {
                   defaultValue={memoryApiUrl}
                   onBlur={(e) => setMemoryApiUrl(e.target.value)}
                   placeholder="http://localhost:3040"
-                  className="w-full bg-aegis-bg/50 border border-aegis-border/20 rounded-lg px-3 py-2 text-[12px] font-mono text-aegis-text placeholder:text-aegis-text-dim/30 focus:outline-none focus:border-aegis-primary/40"
+                  className="w-full bg-[rgb(var(--aegis-overlay)/0.05)] border border-[rgb(var(--aegis-overlay)/0.1)] rounded-lg px-3 py-2 text-[12px] font-mono text-aegis-text placeholder:text-aegis-text-dim/30 focus:outline-none focus:border-[rgb(var(--aegis-primary)/0.4)] focus:bg-[rgb(var(--aegis-overlay)/0.07)]"
+                  style={{ colorScheme: 'dark' }}
                 />
               </div>
             )}
@@ -453,14 +507,14 @@ export function SettingsPageFull() {
         <div className="text-center py-4 mb-4">
           <div className="text-3xl mb-2">🛡️</div>
           <div className="text-[14px] font-bold text-aegis-text">AEGIS Desktop</div>
-          <div className="text-[12px] text-aegis-text-dim mt-1">v5.0.0 — Mission Control</div>
+          <div className="text-[12px] text-aegis-text-dim mt-1">v5.1.0 — Mission Control</div>
           <div className="text-[11px] text-aegis-text-dim mt-0.5">Advanced Executive General Intelligence System</div>
         </div>
         <div className="space-y-2 border-t border-aegis-border/15 pt-3">
           {[
             ['Platform', typeof navigator !== 'undefined' ? navigator.platform : '—'],
             ['User Agent', typeof navigator !== 'undefined' ? (navigator.userAgent.match(/Electron\/[\d.]+/)?.[0] || '—') : '—'],
-            ['Gateway', connected ? 'ws://127.0.0.1:18789 ✓' : '— ✗'],
+            ['Gateway', connected ? `${localStorage.getItem('aegis-gateway-http')?.replace('http', 'ws') || 'ws://127.0.0.1:18789'} ✓` : '— ✗'],
             ['Model', mainModel.split('/').pop() || '—'],
           ].map(([label, value]) => (
             <div key={label} className="flex items-center justify-between">

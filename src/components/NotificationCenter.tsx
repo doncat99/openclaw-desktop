@@ -52,11 +52,11 @@ export function NotificationCenter() {
             </div>
             <div className="flex items-center gap-1">
               {notifications.length > 0 && (
-                <button onClick={clearAll} className="p-1 rounded-lg hover:bg-white/[0.05] text-aegis-text-dim" title="مسح الكل">
+                <button onClick={clearAll} className="p-1 rounded-lg hover:bg-[rgb(var(--aegis-overlay)/0.05)] text-aegis-text-dim" title="مسح الكل">
                   <Trash2 size={13} />
                 </button>
               )}
-              <button onClick={() => { markAllRead(); setPanelOpen(false); }} className="p-1 rounded-lg hover:bg-white/[0.05] text-aegis-text-dim">
+              <button onClick={() => { markAllRead(); setPanelOpen(false); }} className="p-1 rounded-lg hover:bg-[rgb(var(--aegis-overlay)/0.05)] text-aegis-text-dim">
                 <X size={13} />
               </button>
             </div>

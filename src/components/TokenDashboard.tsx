@@ -160,14 +160,14 @@ export function TokenDashboard({ open, onClose }: TokenDashboardProps) {
             <button
               onClick={loadDetails}
               disabled={loading}
-              className="p-2 rounded-xl hover:bg-white/[0.04] transition-colors"
+              className="p-2 rounded-xl hover:bg-[rgb(var(--aegis-overlay)/0.04)] transition-colors"
               title="تحديث"
             >
               <RefreshCw size={14} className={clsx('text-aegis-text-dim', loading && 'animate-spin')} />
             </button>
             <button
               onClick={onClose}
-              className="p-2 rounded-xl hover:bg-white/[0.04] transition-colors"
+              className="p-2 rounded-xl hover:bg-[rgb(var(--aegis-overlay)/0.04)] transition-colors"
             >
               <X size={14} className="text-aegis-text-muted" />
             </button>

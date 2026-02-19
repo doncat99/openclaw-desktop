@@ -16,7 +16,7 @@ interface SparklineProps {
  */
 export function Sparkline({
   data,
-  color = '#4EC9B0',
+  color = 'rgb(var(--aegis-primary))',
   className,
   width = 120,
   height = 32,

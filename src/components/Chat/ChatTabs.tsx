@@ -1,29 +1,332 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Plus, Shield, MessageSquare, ChevronDown } from 'lucide-react';
+import { Plus, Shield, MessageSquare, ChevronDown, Zap, RotateCcw } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useChatStore, Session } from '@/stores/chatStore';
+import { useGatewayDataStore } from '@/stores/gatewayDataStore';
 import { gateway } from '@/services/gateway';
+import { themeHex, themeAlpha, dataColor } from '@/utils/theme-colors';
 import clsx from 'clsx';
 
 // ═══════════════════════════════════════════════════════════
-// ChatTabs — Tab bar for multi-session chat
+// ChatHeader — Compact header replacing old tab bar
+// Layout: 🛡️ AEGIS ∨       +  ●  165k / 200k
 // ═══════════════════════════════════════════════════════════
 
 const MAIN_SESSION = 'agent:main:main';
 
-/** Truncate session label for tab display */
-function tabLabel(session: Session | undefined, key: string): string {
+// ── Helpers ──────────────────────────────────────────────
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${Math.round(n / 1000)}k`;
+  return String(n);
+}
+
+function formatDuration(ms: number): string {
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rem = minutes % 60;
+  if (hours < 24) return rem > 0 ? `${hours}h ${rem}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `${days}d`;
+}
+
+/** Readable label for a session tab */
+function sessionLabel(session: Session | undefined, key: string): string {
   if (key === MAIN_SESSION) return 'AEGIS';
   if (session?.label) {
     const label = session.label;
-    return label.length > 24 ? label.slice(0, 22) + '…' : label;
+    return label.length > 30 ? label.slice(0, 28) + '…' : label;
   }
-  // Extract readable name from session key like "agent:main:sub-abc"
   const parts = key.split(':');
   const last = parts[parts.length - 1];
-  return last.length > 24 ? last.slice(0, 22) + '…' : last;
+  return last.length > 30 ? last.slice(0, 28) + '…' : last;
 }
+
+// ═══════════════════════════════════════════════════════════
+// Agent Status Tooltip — hover card on AEGIS identity
+// ═══════════════════════════════════════════════════════════
+
+function AgentStatusTooltip({ visible, tokenUsage, connected }: {
+  visible: boolean;
+  tokenUsage: any;
+  connected: boolean;
+}) {
+  const { t } = useTranslation();
+
+  // Get session info from gateway data store (has model field)
+  const gatewaySessions = useGatewayDataStore((s) => s.sessions);
+  const mainSession = gatewaySessions.find((s) =>
+    (s.key || '').includes('agent:main:main')
+  );
+
+  const contextTokens = tokenUsage?.contextTokens || 0;
+  const maxTokens = tokenUsage?.maxTokens || 200000;
+  const usagePct = maxTokens > 0 ? Math.round((contextTokens / maxTokens) * 100) : 0;
+  const compactions = tokenUsage?.compactions || 0;
+
+  const model = mainSession?.model || '';
+  const modelShort = model ? model.split('/').pop()! : '—';
+
+  const sessionStart = mainSession?.createdAt || mainSession?.updatedAt;
+  const sessionAge = sessionStart ? formatDuration(Date.now() - new Date(sessionStart).getTime()) : '—';
+
+  const compactAt = Math.round(maxTokens * 0.8);
+  const compactPct = maxTokens > 0 ? Math.round((contextTokens / compactAt) * 100) : 0;
+
+  const usageColor = usagePct > 70 ? themeHex('danger') : usagePct > 40 ? themeHex('warning') : themeHex('primary');
+
+  return (
+    <AnimatePresence>
+      {visible && (
+        <motion.div
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -4 }}
+          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+          className="absolute top-full start-0 mt-2 w-[300px] rounded-2xl border border-[rgb(var(--aegis-overlay)/0.1)] z-[100] overflow-hidden"
+          style={{ background: 'var(--aegis-bg-frosted)', backdropFilter: 'blur(40px)', boxShadow: '0 16px 48px rgb(var(--aegis-overlay) / 0.2)' }}
+        >
+          {/* Header */}
+          <div className="flex items-center gap-3 p-4 border-b border-[rgb(var(--aegis-overlay)/0.06)]">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-aegis-primary/20 to-aegis-primary/5 border border-aegis-primary/25 flex items-center justify-center text-lg">
+              🛡️
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-bold text-aegis-primary">AEGIS</div>
+              <div className="text-[9px] text-aegis-text-dim font-mono">{modelShort}</div>
+            </div>
+            <div className={clsx(
+              'px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider border',
+              connected
+                ? 'bg-aegis-primary/10 text-aegis-primary border-aegis-primary/20'
+                : 'bg-[rgb(var(--aegis-overlay)/0.04)] text-aegis-text-muted border-[rgb(var(--aegis-overlay)/0.08)]'
+            )}>
+              {connected ? 'Active' : 'Offline'}
+            </div>
+          </div>
+
+          {/* Stats Grid */}
+          <div className="grid grid-cols-2 gap-2 p-3">
+            <div className="bg-[rgb(var(--aegis-overlay)/0.02)] border border-[rgb(var(--aegis-overlay)/0.04)] rounded-xl p-2.5 text-center">
+              <div className="text-base font-extrabold" style={{ color: 'rgb(var(--aegis-accent))' }}>{compactions}</div>
+              <div className="text-[8px] text-aegis-text-dim uppercase tracking-wider mt-0.5">{t('chat.compactions', 'Compactions')}</div>
+            </div>
+            <div className="bg-[rgb(var(--aegis-overlay)/0.02)] border border-[rgb(var(--aegis-overlay)/0.04)] rounded-xl p-2.5 text-center">
+              <div className="text-base font-extrabold" style={{ color: dataColor(3) }}>{sessionAge}</div>
+              <div className="text-[8px] text-aegis-text-dim uppercase tracking-wider mt-0.5">{t('chat.sessionAge', 'Session Age')}</div>
+            </div>
+          </div>
+
+          {/* Context Usage Bar */}
+          <div className="px-4 pb-2">
+            <div className="flex justify-between items-center mb-1.5">
+              <span className="text-[10px] text-aegis-text-muted flex items-center gap-1">
+                <Zap size={10} /> {t('chat.contextUsage', 'Context Usage')}
+              </span>
+              <span className="text-[10px] font-semibold font-mono" style={{ color: usageColor }}>
+                {formatTokens(contextTokens)} / {formatTokens(maxTokens)}
+              </span>
+            </div>
+            <div className="w-full h-[5px] rounded-full bg-[rgb(var(--aegis-overlay)/0.04)] overflow-hidden">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${usagePct}%` }}
+                transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+                className="h-full rounded-full"
+                style={{ background: `linear-gradient(90deg, ${themeHex('primary')}, ${usageColor})` }}
+              />
+            </div>
+          </div>
+
+          {/* Info Rows */}
+          <div className="px-4 pb-3 space-y-0">
+            <div className="flex items-center gap-2 py-1.5 border-t border-[rgb(var(--aegis-overlay)/0.03)]">
+              <span className="text-xs">🗜️</span>
+              <span className="text-[10px] text-aegis-text-muted flex-1">{t('chat.compactsAt', 'Compaction at')}</span>
+              <span className={clsx('text-[10px] font-bold font-mono', compactPct > 80 ? 'text-aegis-danger' : compactPct > 50 ? 'text-aegis-warning' : 'text-aegis-primary')}>
+                ~{formatTokens(compactAt)}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 py-1.5 border-t border-[rgb(var(--aegis-overlay)/0.03)]">
+              <span className="text-xs">💓</span>
+              <span className="text-[10px] text-aegis-text-muted flex-1">{t('chat.heartbeat', 'Heartbeat')}</span>
+              <span className="text-[10px] font-bold font-mono text-aegis-primary">15m interval</span>
+            </div>
+            <div className="flex items-center gap-2 py-1.5 border-t border-[rgb(var(--aegis-overlay)/0.03)]">
+              <span className="text-xs">🧠</span>
+              <span className="text-[10px] text-aegis-text-muted flex-1">{t('chat.thinking', 'Thinking')}</span>
+              <span className="text-[10px] font-bold font-mono" style={{ color: dataColor(3) }}>HIGH</span>
+            </div>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// Session Switcher Dropdown
+// ═══════════════════════════════════════════════════════════
+
+function SessionDropdown({ open, onClose, onSelect, openTabs, sessions, activeKey }: {
+  open: boolean;
+  onClose: () => void;
+  onSelect: (key: string) => void;
+  openTabs: string[];
+  sessions: Session[];
+  activeKey: string;
+}) {
+  const { t } = useTranslation();
+  const [availableSessions, setAvailableSessions] = useState<Session[]>([]);
+  const [loading, setLoading] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open, onClose]);
+
+  // Load all available sessions when opened
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    gateway.getSessions()
+      .then((result: any) => {
+        const list: Session[] = (result?.sessions || []).map((s: any) => ({
+          key: s.key || s.sessionKey,
+          label: s.label || s.key || '',
+          kind: s.kind,
+          lastMessage: s.lastMessage,
+          lastTimestamp: s.lastTimestamp,
+        }));
+        // Sessions not already in open tabs
+        setAvailableSessions(list.filter((s) => !openTabs.includes(s.key)));
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [open, openTabs]);
+
+  const getSession = (key: string) => sessions.find((s) => s.key === key);
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          ref={dropdownRef}
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -4 }}
+          transition={{ duration: 0.12 }}
+          className="absolute top-full start-0 mt-1.5 w-72 max-h-80 overflow-y-auto rounded-2xl border border-[rgb(var(--aegis-overlay)/0.1)] z-[100]"
+          style={{ background: 'var(--aegis-bg-frosted)', backdropFilter: 'blur(40px)', boxShadow: '0 16px 48px rgb(var(--aegis-overlay) / 0.25)' }}
+        >
+          {/* Open tabs section */}
+          {openTabs.length > 0 && (
+            <div className="p-2">
+              <div className="text-[9px] text-aegis-text-dim uppercase tracking-wider px-2 py-1 mb-0.5">
+                {t('chat.openSessions', 'Open Sessions')}
+              </div>
+              {openTabs.map((key) => {
+                const session = getSession(key);
+                const isActive = key === activeKey;
+                const isMain = key === MAIN_SESSION;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => { onSelect(key); onClose(); }}
+                    className={clsx(
+                      'w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-start transition-colors',
+                      isActive
+                        ? 'bg-aegis-primary/10 border border-aegis-primary/15'
+                        : 'hover:bg-[rgb(var(--aegis-overlay)/0.05)] border border-transparent',
+                    )}
+                  >
+                    {isMain ? (
+                      <Shield size={14} className="text-aegis-primary shrink-0" />
+                    ) : (
+                      <MessageSquare size={14} className="text-aegis-text-muted shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className={clsx(
+                        'text-[12px] font-medium truncate',
+                        isActive ? 'text-aegis-primary' : 'text-aegis-text',
+                      )}>
+                        {sessionLabel(session, key)}
+                      </div>
+                      {session?.kind && !isMain && (
+                        <div className="text-[9px] text-aegis-text-dim font-mono mt-0.5">{session.kind}</div>
+                      )}
+                    </div>
+                    {isActive && (
+                      <div className="w-1.5 h-1.5 rounded-full bg-aegis-primary shrink-0" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Divider + available sessions */}
+          {availableSessions.length > 0 && (
+            <>
+              <div className="mx-3 border-t border-[rgb(var(--aegis-overlay)/0.06)]" />
+              <div className="p-2">
+                <div className="text-[9px] text-aegis-text-dim uppercase tracking-wider px-2 py-1 mb-0.5">
+                  {t('chat.otherSessions', 'Other Sessions')}
+                </div>
+                {availableSessions.map((session) => (
+                  <button
+                    key={session.key}
+                    onClick={() => { onSelect(session.key); onClose(); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-start hover:bg-[rgb(var(--aegis-overlay)/0.05)] transition-colors border border-transparent"
+                  >
+                    <MessageSquare size={14} className="text-aegis-text-dim shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12px] text-aegis-text font-medium truncate">
+                        {session.label || session.key}
+                      </div>
+                      {session.kind && (
+                        <div className="text-[9px] text-aegis-text-dim font-mono mt-0.5">{session.kind}</div>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Loading state */}
+          {loading && (
+            <div className="text-center py-3 text-[11px] text-aegis-text-dim">
+              {t('common.loading', 'Loading...')}
+            </div>
+          )}
+
+          {/* Empty state (no other sessions) */}
+          {!loading && availableSessions.length === 0 && openTabs.length <= 1 && (
+            <div className="text-center py-4 text-[11px] text-aegis-text-dim px-4">
+              {t('chat.noOtherSessions', 'No other sessions')}
+            </div>
+          )}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// ChatTabs (ChatHeader) — Main export
+// ═══════════════════════════════════════════════════════════
 
 export function ChatTabs() {
   const { t } = useTranslation();
@@ -32,192 +335,237 @@ export function ChatTabs() {
     activeSessionKey,
     sessions,
     openTab,
-    closeTab,
     setActiveSession,
     connected,
+    connecting,
+    tokenUsage,
   } = useChatStore();
 
-  const [showPicker, setShowPicker] = useState(false);
-  const [availableSessions, setAvailableSessions] = useState<Session[]>([]);
-  const [loadingSessions, setLoadingSessions] = useState(false);
-  const pickerRef = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [showSessions, setShowSessions] = useState(false);
+  const [showTooltip, setShowTooltip] = useState(false);
+  const tooltipTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const identityRef = useRef<HTMLDivElement>(null);
 
-  // Close picker on outside click
+  // ── Refresh ──
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const handleRefresh = useCallback(() => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    window.dispatchEvent(new Event('aegis:refresh'));
+    setTimeout(() => setIsRefreshing(false), 800);
+  }, [isRefreshing]);
+
+  // ── New session picker (+ button) ──
+  const [showNewPicker, setShowNewPicker] = useState(false);
+  const [newSessions, setNewSessions] = useState<Session[]>([]);
+  const [loadingNew, setLoadingNew] = useState(false);
+  const newPickerRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    if (!showPicker) return;
+    if (!showNewPicker) return;
     const handler = (e: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
-        setShowPicker(false);
+      if (newPickerRef.current && !newPickerRef.current.contains(e.target as Node)) {
+        setShowNewPicker(false);
       }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [showPicker]);
+  }, [showNewPicker]);
 
-  // Load available sessions when picker opens
-  const loadAvailableSessions = useCallback(async () => {
-    if (!connected) return;
-    setLoadingSessions(true);
-    try {
-      const result = await gateway.getSessions();
-      const list: Session[] = (result?.sessions || []).map((s: any) => ({
-        key: s.key || s.sessionKey,
-        label: s.label || s.key || '',
-        kind: s.kind,
-        lastMessage: s.lastMessage,
-        lastTimestamp: s.lastTimestamp,
-      }));
-      // Filter out already-open tabs
-      setAvailableSessions(list.filter((s) => !openTabs.includes(s.key)));
-    } catch (err) {
-      console.error('[ChatTabs] Failed to load sessions:', err);
-    } finally {
-      setLoadingSessions(false);
+  const handleOpenNewPicker = useCallback(() => {
+    setShowNewPicker((v) => !v);
+    if (!showNewPicker) {
+      setLoadingNew(true);
+      gateway.getSessions()
+        .then((result: any) => {
+          const list: Session[] = (result?.sessions || []).map((s: any) => ({
+            key: s.key || s.sessionKey,
+            label: s.label || s.key || '',
+            kind: s.kind,
+          }));
+          setNewSessions(list.filter((s) => !openTabs.includes(s.key)));
+        })
+        .catch(() => {})
+        .finally(() => setLoadingNew(false));
     }
-  }, [connected, openTabs]);
+  }, [showNewPicker, openTabs]);
 
-  const handleOpenPicker = useCallback(() => {
-    setShowPicker((v) => !v);
-    if (!showPicker) loadAvailableSessions();
-  }, [showPicker, loadAvailableSessions]);
+  // ── Tooltip hover logic ──
+  const handleIdentityEnter = useCallback(() => {
+    tooltipTimeout.current = setTimeout(() => setShowTooltip(true), 400);
+  }, []);
 
-  const handleSelectSession = useCallback((key: string) => {
-    openTab(key);
-    setShowPicker(false);
-  }, [openTab]);
+  const handleIdentityLeave = useCallback(() => {
+    if (tooltipTimeout.current) clearTimeout(tooltipTimeout.current);
+    setShowTooltip(false);
+  }, []);
 
-  const handleTabClick = useCallback((key: string) => {
-    if (key !== activeSessionKey) setActiveSession(key);
-  }, [activeSessionKey, setActiveSession]);
+  // ── Session select from dropdown ──
+  const handleSessionSelect = useCallback((key: string) => {
+    if (openTabs.includes(key)) {
+      setActiveSession(key);
+    } else {
+      openTab(key);
+    }
+  }, [openTabs, setActiveSession, openTab]);
 
-  const handleCloseTab = useCallback((e: React.MouseEvent, key: string) => {
-    e.stopPropagation();
-    closeTab(key);
-  }, [closeTab]);
+  // ── Active session info ──
+  const activeSession = sessions.find((s) => s.key === activeSessionKey);
+  const activeLabel = sessionLabel(activeSession, activeSessionKey);
+  const isMain = activeSessionKey === MAIN_SESSION;
 
-  // Find session info for a tab key
-  const getSession = (key: string) => sessions.find((s) => s.key === key);
+  // ── Status dot color ──
+  const statusDotClass = connected
+    ? 'bg-aegis-success'
+    : connecting
+      ? 'bg-aegis-warning animate-pulse'
+      : 'bg-aegis-danger';
+
+  const statusLabel = connected
+    ? t('connection.connected', 'Connected')
+    : connecting
+      ? t('connection.connecting', 'Connecting...')
+      : t('connection.disconnected', 'Disconnected');
 
   return (
-    <div className="shrink-0 flex items-center h-[40px] bg-[rgba(13,17,23,0.6)] backdrop-blur-xl border-b border-white/[0.04] overflow-hidden" role="tablist" aria-label="Chat sessions">
-      {/* Scrollable tab bar */}
-      <div
-        ref={scrollRef}
-        className="flex-1 flex items-center overflow-x-auto scrollbar-hidden gap-0.5 px-1"
-      >
-        <AnimatePresence initial={false}>
-          {openTabs.map((key) => {
-            const isActive = key === activeSessionKey;
-            const isMain = key === MAIN_SESSION;
-            const session = getSession(key);
-
-            return (
-              <motion.button
-                key={key}
-                layout
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9, width: 0 }}
-                transition={{ duration: 0.15 }}
-                role="tab"
-                aria-selected={isActive}
-                aria-label={tabLabel(session, key)}
-                onClick={() => handleTabClick(key)}
-                className={clsx(
-                  'relative flex items-center gap-1.5 px-3 py-1.5 rounded-t-lg text-[12px] font-medium whitespace-nowrap max-w-[200px] min-w-[80px] shrink-0 transition-colors',
-                  isActive
-                    ? 'text-aegis-text border-b-2 border-b-[#4EC9B0]'
-                    : 'text-white/35 hover:bg-white/[0.04] hover:text-white/55',
-                )}
-              >
-                {/* Icon */}
-                {isMain ? (
-                  <Shield size={12} className="text-aegis-primary shrink-0" />
-                ) : (
-                  <MessageSquare size={12} className="shrink-0 opacity-50" />
-                )}
-
-                {/* Label */}
-                <span className="truncate">{tabLabel(session, key)}</span>
-
-                {/* Close button (not for main) */}
-                {!isMain && (
-                  <span
-                    onClick={(e) => handleCloseTab(e, key)}
-                    className="ml-1 p-0.5 rounded hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-pointer"
-                    style={{ opacity: isActive ? 0.6 : undefined }}
-                  >
-                    <X size={10} />
-                  </span>
-                )}
-              </motion.button>
-            );
-          })}
-        </AnimatePresence>
-      </div>
-
-      {/* New Tab button + dropdown */}
-      <div className="relative shrink-0 mx-1" ref={pickerRef}>
-        <button
-          onClick={handleOpenPicker}
-          className={clsx(
-            'flex items-center gap-0.5 px-2 py-1.5 rounded-lg text-[11px] transition-colors',
-            'text-white/25 hover:text-white/45 hover:bg-white/[0.04]',
-            showPicker && 'bg-white/[0.06] text-white/50',
-          )}
-          title={t('chat.newTab', 'فتح جلسة')}
+    <div
+      className="shrink-0 flex items-center h-[40px] bg-[var(--aegis-bg-frosted-60)] backdrop-blur-xl border-b border-[rgb(var(--aegis-overlay)/0.04)] relative z-20 px-3"
+      role="banner"
+    >
+      {/* ── Left: Identity + Status + Tokens + Session Switcher ── */}
+      <div className="relative flex items-center gap-2.5 min-w-0">
+        {/* AEGIS identity block — hover for tooltip */}
+        <div
+          ref={identityRef}
+          className="flex items-center gap-2.5 cursor-default select-none"
+          onMouseEnter={handleIdentityEnter}
+          onMouseLeave={handleIdentityLeave}
         >
-          <Plus size={13} />
-          <ChevronDown size={10} className={clsx('transition-transform', showPicker && 'rotate-180')} />
+          {/* Icon */}
+          {isMain ? (
+            <span className="text-[15px] leading-none">🛡️</span>
+          ) : (
+            <MessageSquare size={14} className="text-aegis-text-muted" />
+          )}
+
+          {/* Status dot + Name */}
+          <div className="flex items-center gap-1.5">
+            <div className={clsx('w-[7px] h-[7px] rounded-full shrink-0', statusDotClass)} title={statusLabel} />
+            <span className="text-[13px] font-semibold text-aegis-text tracking-tight">
+              {activeLabel}
+            </span>
+          </div>
+        </div>
+
+        {/* ∨ Session dropdown toggle */}
+        <button
+          onClick={() => { setShowSessions((v) => !v); setShowTooltip(false); }}
+          className={clsx(
+            'p-1 rounded-md transition-colors',
+            'text-aegis-text-dim hover:text-aegis-text-muted hover:bg-[rgb(var(--aegis-overlay)/0.05)]',
+            showSessions && 'bg-[rgb(var(--aegis-overlay)/0.06)] text-aegis-text-muted',
+          )}
+          aria-label={t('chat.switchSession', 'Switch session')}
+        >
+          <ChevronDown size={12} className={clsx('transition-transform', showSessions && 'rotate-180')} />
         </button>
 
-        {/* Session picker dropdown */}
-        <AnimatePresence>
-          {showPicker && (
-            <motion.div
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.12 }}
-              className="absolute top-full right-0 mt-1 w-64 max-h-64 overflow-y-auto rounded-xl glass shadow-float border border-aegis-border/30 z-50"
-            >
-              <div className="p-2">
-                <div className="text-[10px] text-aegis-text-dim uppercase tracking-wider px-2 py-1 mb-1">
-                  {t('chat.availableSessions', 'الجلسات المتاحة')}
-                </div>
+        {/* Tooltip (on hover) */}
+        <AgentStatusTooltip
+          visible={showTooltip && !showSessions}
+          tokenUsage={tokenUsage}
+          connected={connected}
+        />
 
-                {loadingSessions ? (
-                  <div className="text-center py-4 text-[11px] text-aegis-text-dim">
-                    {t('common.loading', 'جاري التحميل...')}
-                  </div>
-                ) : availableSessions.length === 0 ? (
-                  <div className="text-center py-4 text-[11px] text-aegis-text-dim">
-                    {t('chat.noOtherSessions', 'لا توجد جلسات أخرى')}
-                  </div>
-                ) : (
-                  availableSessions.map((session) => (
-                    <button
-                      key={session.key}
-                      onClick={() => handleSelectSession(session.key)}
-                      className="w-full flex flex-col gap-0.5 px-3 py-2 rounded-lg text-start hover:bg-white/[0.05] transition-colors"
-                    >
-                      <span className="text-[12px] text-aegis-text font-medium truncate">
-                        {session.label || session.key}
-                      </span>
-                      {session.kind && (
-                        <span className="text-[10px] text-aegis-text-dim font-mono">
-                          {session.kind}
-                        </span>
-                      )}
-                    </button>
-                  ))
-                )}
-              </div>
-            </motion.div>
+        {/* Session switcher dropdown (on click) */}
+        <SessionDropdown
+          open={showSessions}
+          onClose={() => setShowSessions(false)}
+          onSelect={handleSessionSelect}
+          openTabs={openTabs}
+          sessions={sessions}
+          activeKey={activeSessionKey}
+        />
+      </div>
+
+      {/* ── Spacer ── */}
+      <div className="flex-1" />
+
+      {/* ── Right: Refresh + New session ── */}
+      <div className="flex items-center gap-0.5 shrink-0">
+        {/* Refresh button */}
+        <button
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+          className={clsx(
+            'p-1.5 rounded-lg transition-colors',
+            'text-aegis-text-dim hover:text-aegis-text-muted hover:bg-[rgb(var(--aegis-overlay)/0.05)]',
+            isRefreshing && 'opacity-50 cursor-wait',
           )}
-        </AnimatePresence>
+          title={t('chat.refresh', 'Refresh chat')}
+        >
+          <RotateCcw size={13} className={clsx('transition-transform', isRefreshing && 'animate-spin')} />
+        </button>
+
+        <div className="relative" ref={newPickerRef}>
+          <button
+            onClick={handleOpenNewPicker}
+            className={clsx(
+              'p-1.5 rounded-lg transition-colors',
+              'text-aegis-text-dim hover:text-aegis-text-muted hover:bg-[rgb(var(--aegis-overlay)/0.05)]',
+              showNewPicker && 'bg-[rgb(var(--aegis-overlay)/0.06)] text-aegis-text-muted',
+            )}
+            title={t('chat.newTab', 'Open session')}
+          >
+            <Plus size={14} />
+          </button>
+
+          {/* New session picker dropdown */}
+          <AnimatePresence>
+            {showNewPicker && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.12 }}
+                className="absolute top-full end-0 mt-1.5 w-64 max-h-64 overflow-y-auto rounded-xl border border-[rgb(var(--aegis-overlay)/0.1)] z-[100]"
+                style={{ background: 'var(--aegis-bg-frosted)', backdropFilter: 'blur(40px)', boxShadow: '0 16px 48px rgb(var(--aegis-overlay) / 0.25)' }}
+              >
+                <div className="p-2">
+                  <div className="text-[9px] text-aegis-text-dim uppercase tracking-wider px-2 py-1 mb-1">
+                    {t('chat.availableSessions', 'Available Sessions')}
+                  </div>
+                  {loadingNew ? (
+                    <div className="text-center py-4 text-[11px] text-aegis-text-dim">
+                      {t('common.loading', 'Loading...')}
+                    </div>
+                  ) : newSessions.length === 0 ? (
+                    <div className="text-center py-4 text-[11px] text-aegis-text-dim">
+                      {t('chat.noOtherSessions', 'No other sessions')}
+                    </div>
+                  ) : (
+                    newSessions.map((session) => (
+                      <button
+                        key={session.key}
+                        onClick={() => { openTab(session.key); setShowNewPicker(false); }}
+                        className="w-full flex flex-col gap-0.5 px-3 py-2 rounded-lg text-start hover:bg-[rgb(var(--aegis-overlay)/0.05)] transition-colors"
+                      >
+                        <span className="text-[12px] text-aegis-text font-medium truncate">
+                          {session.label || session.key}
+                        </span>
+                        {session.kind && (
+                          <span className="text-[10px] text-aegis-text-dim font-mono">{session.kind}</span>
+                        )}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
     </div>
   );
 }
+

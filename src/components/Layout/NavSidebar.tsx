@@ -8,7 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import {
   LayoutDashboard, MessageCircle, Kanban, DollarSign,
-  Clock, Bot, Settings, Brain
+  Clock, Bot, Settings, Brain, Activity, User,
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getDirection } from '@/i18n';
@@ -66,7 +66,7 @@ export function NavSidebar() {
                 'transition-all duration-300 group',
                 isActive
                   ? 'nav-icon-active-glow text-aegis-primary'
-                  : 'text-white/25 hover:text-white/50 hover:bg-white/[0.04]'
+                  : 'text-aegis-text-muted hover:text-aegis-text-secondary hover:bg-[rgb(var(--aegis-overlay)/0.04)]'
               )}
             >
               {/* Active indicator bar — animated slide */}
@@ -115,11 +115,11 @@ export function NavSidebar() {
         <div className={clsx(
           'w-[36px] h-[36px] rounded-xl',
           'bg-gradient-to-br from-aegis-primary/20 to-[rgba(213,0,249,0.15)]',
-          'border border-white/[0.08]',
+          'border border-[rgb(var(--aegis-overlay)/0.08)]',
           'flex items-center justify-center',
-          'text-[14px] font-bold text-aegis-primary'
+          'text-aegis-primary'
         )}>
-          R
+          <User size={16} />
         </div>
       </div>
     </div>

@@ -1,12 +1,57 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { ArrowDown, Loader2, RefreshCw, Shield } from 'lucide-react';
+import { ArrowDown, Loader2, Shield, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useChatStore } from '@/stores/chatStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { gateway } from '@/services/gateway';
 import { MessageBubble } from './MessageBubble';
+import { ToolCallBubble } from './ToolCallBubble';
 import { MessageInput } from './MessageInput';
 import { TypingIndicator } from './TypingIndicator';
 import clsx from 'clsx';
+
+// ═══════════════════════════════════════════════════════════
+// Compact Divider — shimmer animated line
+// ═══════════════════════════════════════════════════════════
+
+function CompactDivider({ timestamp }: { timestamp?: string }) {
+  const time = timestamp ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  return (
+    <div className="flex items-center gap-0 py-5 px-4 group">
+      {/* Left line with shimmer */}
+      <div className="flex-1 h-px relative overflow-visible">
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-amber-500/30 to-transparent" />
+        <div
+          className="absolute top-[-1px] h-[3px] w-[60%] bg-gradient-to-r from-transparent via-amber-400/50 to-transparent rounded-full"
+          style={{ animation: 'compact-shimmer 4s ease-in-out infinite' }}
+        />
+      </div>
+      {/* Badge */}
+      <div className="flex items-center gap-1.5 px-3.5 py-1 bg-amber-500/[0.06] border border-amber-500/[0.12] rounded-full shrink-0 mx-1 transition-colors group-hover:bg-amber-500/[0.1] group-hover:border-amber-500/[0.2]">
+        <Zap size={10} className="text-amber-500/50" />
+        <span className="text-[9px] font-bold uppercase tracking-[1.5px] text-amber-500/50 group-hover:text-amber-500/70 transition-colors">
+          Context Compacted
+        </span>
+        {time && <span className="text-[9px] text-amber-500/25 font-mono">· {time}</span>}
+      </div>
+      {/* Right line with shimmer */}
+      <div className="flex-1 h-px relative overflow-visible">
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-amber-500/30 to-transparent" />
+        <div
+          className="absolute top-[-1px] h-[3px] w-[60%] bg-gradient-to-r from-transparent via-amber-400/50 to-transparent rounded-full"
+          style={{ animation: 'compact-shimmer 4s ease-in-out infinite 2s', right: 0 }}
+        />
+      </div>
+      <style>{`
+        @keyframes compact-shimmer {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(260%); }
+        }
+      `}</style>
+    </div>
+  );
+}
 
 // ═══════════════════════════════════════════════════════════
 // Chat View — premium chat area
@@ -14,17 +59,39 @@ import clsx from 'clsx';
 
 export function ChatView() {
   const { t } = useTranslation();
-  const { messages, isTyping, connected, connecting, connectionError, isLoadingHistory, setMessages, setIsLoadingHistory, activeSessionKey, cacheMessagesForSession, getCachedMessages } = useChatStore();
+  const { messages, isTyping, connected, connecting, connectionError, isLoadingHistory, setMessages, setIsLoadingHistory, activeSessionKey, cacheMessagesForSession, getCachedMessages, tokenUsage, addMessage, setHistoryLoader } = useChatStore();
+  const toolIntentEnabled = useSettingsStore((s) => s.toolIntentEnabled);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
+  const prevCompactionsRef = useRef<number>(-1);
 
   const scrollToBottom = useCallback((smooth = true) => {
     bottomRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant' });
   }, []);
 
   useEffect(() => { if (autoScroll) scrollToBottom(); }, [messages, isTyping, autoScroll, scrollToBottom]);
+
+  // ── Real-time compaction detection ──
+  // Watches tokenUsage.compactions counter — when it increases, inject a CompactDivider
+  useEffect(() => {
+    const current = tokenUsage?.compactions ?? 0;
+    if (prevCompactionsRef.current === -1) {
+      // Initial load — just record the baseline
+      prevCompactionsRef.current = current;
+      return;
+    }
+    if (current > prevCompactionsRef.current) {
+      addMessage({
+        id: `compaction-live-${Date.now()}`,
+        role: 'compaction' as any,
+        content: '',
+        timestamp: new Date().toISOString(),
+      });
+    }
+    prevCompactionsRef.current = current;
+  }, [tokenUsage?.compactions, addMessage]);
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -91,7 +158,52 @@ export function ChatView() {
             }
             return null;
           }
-          if (role === 'toolResult' || role === 'tool') return null;
+          // ── Tool call messages → ToolCallBubble (only if enabled in settings) ──
+          if (!toolIntentEnabled && (
+            role === 'toolResult' || role === 'tool' ||
+            (role === 'assistant' && Array.isArray(msg.content) &&
+              msg.content.every((b: any) => b.type === 'toolCall' || b.type === 'tool_use'))
+          )) return null;
+
+          if (role === 'assistant' && Array.isArray(msg.content)) {
+            const toolBlocks = msg.content.filter((b: any) =>
+              b.type === 'toolCall' || b.type === 'tool_use'
+            );
+            if (toolBlocks.length > 0) {
+              // Map each tool block as a separate tool message
+              return toolBlocks.map((block: any, idx: number) => {
+                const toolName = block.name || block.toolName || 'unknown';
+                const toolInput = block.input ?? block.params ?? {};
+                return {
+                  id: `${msg.id || 'tool'}-call-${idx}`,
+                  role: 'tool' as const,
+                  content: '',
+                  toolName,
+                  toolInput,
+                  toolStatus: 'done' as const,
+                  timestamp: msg.timestamp || msg.createdAt || new Date().toISOString(),
+                };
+              });
+            }
+          }
+
+          // Tool result messages — find matching call and attach output
+          if (role === 'toolResult' || role === 'tool') {
+            const toolName = msg.toolName || msg.name || 'unknown';
+            const output = typeof msg.content === 'string'
+              ? msg.content
+              : extractText(msg.content);
+            return {
+              id: msg.id || `tool-result-${Math.random().toString(36).slice(2)}`,
+              role: 'tool' as const,
+              content: '',
+              toolName,
+              toolOutput: output?.slice(0, 2000) || '',
+              toolStatus: 'done' as const,
+              timestamp: msg.timestamp || msg.createdAt || new Date().toISOString(),
+            };
+          }
+
           if (role !== 'user' && role !== 'assistant') return null;
           if (Array.isArray(msg.content)) {
             const hasOnlyTools = msg.content.every((b: any) =>
@@ -109,6 +221,7 @@ export function ChatView() {
             mediaUrl: msg.mediaUrl || undefined,
           };
         })
+        .flat()
         .filter(Boolean) as any[];
       setMessages(filtered);
       cacheMessagesForSession(activeSessionKey, filtered);
@@ -127,10 +240,14 @@ export function ChatView() {
     finally { setTimeout(() => setIsRefreshing(false), 500); }
   }, [isRefreshing, isLoadingHistory, loadHistory]);
 
-  // Load history on connect or session change
+  // History loads only on user action (Refresh or send message)
+  // — NOT automatically on connect, so Welcome screen stays visible on launch
+
+  // Register loadHistory in store so MessageInput can trigger it before first send
   useEffect(() => {
-    if (connected && !isLoadingHistory) loadHistory();
-  }, [connected, activeSessionKey]);
+    setHistoryLoader(loadHistory);
+    return () => setHistoryLoader(null);
+  }, [loadHistory, setHistoryLoader]);
 
   useEffect(() => {
     const handler = () => handleRefresh();
@@ -142,21 +259,6 @@ export function ChatView() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 bg-aegis-bg">
-      {/* Chat Header */}
-      <div className="shrink-0 flex items-center justify-between px-5 py-2 border-b border-white/[0.04] bg-[rgba(13,17,23,0.6)] backdrop-blur-xl">
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] text-white/30 font-mono">
-            {messages.length > 0 ? t('chat.messageCount', { count: messages.length }) : ''}
-          </span>
-        </div>
-        <button onClick={handleRefresh} disabled={isRefreshing || isLoadingHistory || !connected}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] text-white/25 hover:text-white/45 hover:bg-white/[0.05] transition-colors disabled:opacity-30"
-          title={t('chat.refresh')}>
-          <RefreshCw size={13} className={isRefreshing ? 'animate-spin' : ''} />
-          <span>{t('chat.refresh')}</span>
-        </button>
-      </div>
-
       {/* Connection Banner */}
       {!connected && (
         <div className={clsx(
@@ -194,7 +296,7 @@ export function ChatView() {
         ) : messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center px-8">
             <div className="relative mb-8">
-              <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-aegis-primary/15 to-aegis-accent/10 flex items-center justify-center border border-white/[0.08] shadow-[0_0_32px_rgba(78,201,176,0.15)] animate-glow-pulse">
+              <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-aegis-primary/15 to-aegis-accent/10 flex items-center justify-center border border-[rgb(var(--aegis-overlay)/0.08)] shadow-[0_0_32px_rgb(var(--aegis-primary)/0.15)] animate-glow-pulse">
                 <Shield size={36} className="text-aegis-primary" />
               </div>
               <div className="absolute inset-0 w-20 h-20 rounded-3xl border border-aegis-primary/5 animate-pulse-ring" />
@@ -207,17 +309,30 @@ export function ChatView() {
           </div>
         ) : (
           <div className="space-y-0.5">
-            {messages.map((msg) => (
-              msg.role === 'compaction' ? (
-                <div key={msg.id} className="flex items-center gap-3 py-4 px-4">
-                  <div className="flex-1 border-t border-dashed border-amber-500/20" />
-                  <span className="text-[10px] text-amber-500/40 font-semibold uppercase tracking-wider shrink-0">⚡ Context Compacted</span>
-                  <div className="flex-1 border-t border-dashed border-amber-500/20" />
-                </div>
-              ) : (
+            {messages.map((msg) => {
+              if (msg.role === 'compaction') {
+                return <CompactDivider key={msg.id} timestamp={msg.timestamp} />;
+              }
+              // Tool messages — only render when Tool Intent View is enabled; skip otherwise
+              if ((msg.role as string) === 'tool') {
+                if (!toolIntentEnabled) return null;
+                return (
+                  <ToolCallBubble
+                    key={msg.id}
+                    tool={{
+                      toolName: msg.toolName || 'unknown',
+                      input: msg.toolInput,
+                      output: msg.toolOutput,
+                      status: msg.toolStatus || 'done',
+                      durationMs: msg.toolDurationMs,
+                    }}
+                  />
+                );
+              }
+              return (
                 <MessageBubble key={msg.id} message={msg} onResend={msg.role === 'user' ? handleResend : undefined} />
-              )
-            ))}
+              );
+            })}
           </div>
         )}
         {isTyping && <TypingIndicator />}

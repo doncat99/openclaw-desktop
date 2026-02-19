@@ -28,7 +28,7 @@ export function MessageInput() {
   const { t } = useTranslation();
   const { language } = useSettingsStore();
   const dir = getDirection(language);
-  const { isSending, setIsSending, connected, addMessage, setIsTyping, isTyping, activeSessionKey, drafts, setDraft } = useChatStore();
+  const { isSending, setIsSending, connected, addMessage, setIsTyping, isTyping, activeSessionKey, drafts, setDraft, messages, historyLoader } = useChatStore();
   const [text, setText] = useState(() => drafts[activeSessionKey] || '');
   const [files, setFiles] = useState<PendingFile[]>([]);
   const [screenshotOpen, setScreenshotOpen] = useState(false);
@@ -58,6 +58,12 @@ export function MessageInput() {
   const handleSend = useCallback(async () => {
     const trimmed = text.trim();
     if ((!trimmed && files.length === 0) || isSending || !connected) return;
+
+    // On first interaction — load history before sending so context is visible
+    if (messages.length === 0 && historyLoader) {
+      await historyLoader();
+    }
+
     setIsSending(true);
 
     // Separate: images → base64 attachments, non-images → path in message text
@@ -106,7 +112,7 @@ export function MessageInput() {
     } finally {
       setIsSending(false);
     }
-  }, [text, files, isSending, connected, addMessage, setIsSending, setIsTyping]);
+  }, [text, files, isSending, connected, addMessage, setIsSending, setIsTyping, messages, historyLoader]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -241,7 +247,7 @@ export function MessageInput() {
   const removeFile = (index: number) => setFiles((prev) => prev.filter((_, i) => i !== index));
 
   return (
-    <div className="shrink-0 border-t border-white/[0.04] bg-[rgba(13,17,23,0.5)] backdrop-blur-xl">
+    <div className="shrink-0 border-t border-[rgb(var(--aegis-overlay)/0.04)] bg-[var(--aegis-bg-frosted-60)] backdrop-blur-xl">
       {/* File Previews */}
       {files.length > 0 && (
         <div className="flex gap-2 px-4 pt-3 overflow-x-auto scrollbar-hidden">
@@ -259,7 +265,7 @@ export function MessageInput() {
                 className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-aegis-danger/90 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                 <X size={9} className="text-white" />
               </button>
-              <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-[7px] text-center text-white/80 py-0.5">
+              <div className="absolute bottom-0 left-0 right-0 bg-aegis-bg-solid/80 text-[7px] text-center text-aegis-text py-0.5">
                 {formatSize(file.size)}
               </div>
             </div>
@@ -275,10 +281,10 @@ export function MessageInput() {
           {/* Input Wrapper (matches mockup) */}
           <div className={clsx(
             'flex items-center gap-2 px-3 py-2 rounded-2xl flex-1',
-            'bg-aegis-surface border border-white/[0.06]',
+            'bg-aegis-surface border border-[rgb(var(--aegis-overlay)/0.06)]',
             'transition-all duration-200',
             'focus-within:border-aegis-primary/30',
-            'focus-within:shadow-[0_0_0_3px_rgba(78,201,176,0.06),0_0_16px_rgba(78,201,176,0.08)]',
+            'focus-within:shadow-[0_0_0_3px_rgb(var(--aegis-primary)/0.06),0_0_16px_rgb(var(--aegis-primary)/0.08)]',
             !connected && 'opacity-40'
           )} onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}>
             {/* Action Buttons */}
@@ -294,8 +300,8 @@ export function MessageInput() {
               <button key={title} onClick={action} disabled={disabled}
                 className={clsx(
                   'w-[34px] h-[34px] rounded-lg flex items-center justify-center flex-shrink-0',
-                  'bg-white/[0.03] border-none',
-                  'text-white/25 hover:text-white/45 hover:bg-white/[0.07]',
+                  'bg-[rgb(var(--aegis-overlay)/0.03)] border-none',
+                  'text-aegis-text-muted hover:text-aegis-text-muted hover:bg-[rgb(var(--aegis-overlay)/0.07)]',
                   'transition-colors disabled:opacity-30'
                 )}
                 title={title}>
@@ -310,7 +316,7 @@ export function MessageInput() {
               disabled={!connected}
               className={clsx(
                 'flex-1 resize-none bg-transparent border-none text-[14px]',
-                'text-aegis-text placeholder:text-white/25',
+                'text-aegis-text placeholder:text-aegis-text-muted',
                 'focus:outline-none py-1.5 px-1',
                 'max-h-[180px] scrollbar-hidden'
               )}
@@ -332,8 +338,8 @@ export function MessageInput() {
                 className={clsx(
                   'w-[34px] h-[34px] rounded-lg flex items-center justify-center flex-shrink-0 transition-all',
                   text.trim() || files.length > 0
-                    ? 'bg-gradient-to-br from-[#4EC9B0] to-[#2CA78E] text-[#0c1015] shadow-[0_2px_8px_rgba(78,201,176,0.3)] hover:shadow-[0_4px_16px_rgba(78,201,176,0.4)] hover:-translate-y-px'
-                    : 'bg-white/[0.04] text-white/20',
+                    ? 'bg-gradient-to-br from-aegis-primary to-aegis-primary/70 text-aegis-bg shadow-[0_2px_8px_rgb(var(--aegis-primary)/0.3)] hover:shadow-[0_4px_16px_rgb(var(--aegis-primary)/0.4)] hover:-translate-y-px'
+                    : 'bg-[rgb(var(--aegis-overlay)/0.04)] text-aegis-text-dim',
                   'disabled:opacity-30 disabled:cursor-not-allowed disabled:shadow-none'
                 )}
                 title={t('input.send')}>

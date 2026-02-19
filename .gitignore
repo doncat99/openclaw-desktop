@@ -9,3 +9,8 @@ aegis-config.json
 _old/
 UI/
 AEGIS-Desktop-v5-UPGRADE-PLAN.md
+-e 
+# v5.1 concept mockups
+*-concept*.html
+.trash/
+scripts/full-usage-stats.js

@@ -20,6 +20,8 @@ interface SettingsState {
   memoryMode: 'api' | 'local';
   memoryApiUrl: string;
   memoryLocalPath: string;
+  context1mEnabled: boolean;
+  toolIntentEnabled: boolean;
 
   setTheme: (theme: 'dark' | 'light' | 'system') => void;
   setFontSize: (size: number) => void;
@@ -37,12 +39,14 @@ interface SettingsState {
   setMemoryMode: (mode: 'api' | 'local') => void;
   setMemoryApiUrl: (url: string) => void;
   setMemoryLocalPath: (path: string) => void;
+  setContext1mEnabled: (enabled: boolean) => void;
+  setToolIntentEnabled: (enabled: boolean) => void;
 }
 
 const savedLang = (localStorage.getItem('aegis-language') || 'ar') as 'ar' | 'en';
 
 export const useSettingsStore = create<SettingsState>((set) => ({
-  theme: 'dark',
+  theme: (localStorage.getItem('aegis-theme') || 'dark') as 'dark' | 'light' | 'system',
   fontSize: 14,
   sidebarOpen: true,
   sidebarWidth: 280,
@@ -57,8 +61,10 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   memoryMode: (localStorage.getItem('aegis-memory-mode') || 'local') as 'api' | 'local',
   memoryApiUrl: localStorage.getItem('aegis-memory-api-url') || 'http://localhost:3040',
   memoryLocalPath: localStorage.getItem('aegis-memory-local-path') || '',
+  context1mEnabled: localStorage.getItem('aegis-context1m') === 'true',
+  toolIntentEnabled: localStorage.getItem('aegis-tool-intent') === 'true',
 
-  setTheme: (theme) => set({ theme }),
+  setTheme: (theme) => { localStorage.setItem('aegis-theme', theme); set({ theme }); },
   setFontSize: (size) => set({ fontSize: size }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
@@ -74,4 +80,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setMemoryMode: (mode) => { localStorage.setItem('aegis-memory-mode', mode); set({ memoryMode: mode }); },
   setMemoryApiUrl: (url) => { localStorage.setItem('aegis-memory-api-url', url); set({ memoryApiUrl: url }); },
   setMemoryLocalPath: (path) => { localStorage.setItem('aegis-memory-local-path', path); set({ memoryLocalPath: path }); },
+  setContext1mEnabled: (enabled) => { localStorage.setItem('aegis-context1m', String(enabled)); set({ context1mEnabled: enabled }); },
+  setToolIntentEnabled: (enabled) => { localStorage.setItem('aegis-tool-intent', String(enabled)); set({ toolIntentEnabled: enabled }); },
 }));

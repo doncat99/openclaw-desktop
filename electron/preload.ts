@@ -122,4 +122,4 @@ contextBridge.exposeInMainWorld('aegis', api);
 // Type declaration for renderer
 export type AegisAPI = typeof api;
 
-console.log('🛡️ AEGIS Preload v5.0 ready');
+console.log('🛡️ AEGIS Preload v5.1 ready');

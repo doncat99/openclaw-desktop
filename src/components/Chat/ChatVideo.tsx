@@ -31,7 +31,8 @@ function resolveVideoSrc(src: string): string {
 
   // Relative gateway media path (e.g., /media/xxx.mp4)
   if (src.startsWith('/media/') || src.startsWith('/v1/media/')) {
-    return `http://localhost:18789${src}`;
+    const gwUrl = localStorage.getItem('aegis-gateway-http') || 'http://127.0.0.1:18789';
+    return `${gwUrl}${src}`;
   }
 
   return src;
@@ -144,7 +145,7 @@ export function ChatVideo({ src, alt, maxWidth = '100%', maxHeight = '400px', cl
       <video
         ref={videoRef}
         src={resolvedSrc}
-        className="rounded-xl border border-white/[0.08] cursor-pointer transition-all hover:border-white/[0.15]"
+        className="rounded-xl border border-[rgb(var(--aegis-overlay)/0.08)] cursor-pointer transition-all hover:border-[rgb(var(--aegis-overlay)/0.15)]"
         style={{ 
           maxWidth, 
           maxHeight, 
@@ -164,10 +165,10 @@ export function ChatVideo({ src, alt, maxWidth = '100%', maxHeight = '400px', cl
       {/* Loading placeholder */}
       {!loaded && !error && (
         <span 
-          className="rounded-xl border border-white/[0.08] flex items-center justify-center"
-          style={{ display: 'inline-flex', width: 300, height: 170, background: 'rgba(255,255,255,0.03)' }}
+          className="rounded-xl border border-[rgb(var(--aegis-overlay)/0.08)] flex items-center justify-center"
+          style={{ display: 'inline-flex', width: 300, height: 170, background: 'rgb(var(--aegis-overlay) / 0.03)' }}
         >
-          <span className="w-5 h-5 border-2 border-white/10 border-t-white/30 rounded-full animate-spin" style={{ display: 'inline-block' }} />
+          <span className="w-5 h-5 border-2 border-[rgb(var(--aegis-overlay)/0.1)] border-t-white/30 rounded-full animate-spin" style={{ display: 'inline-block' }} />
         </span>
       )}
 
@@ -184,7 +185,7 @@ export function ChatVideo({ src, alt, maxWidth = '100%', maxHeight = '400px', cl
               display: 'inline-flex',
               background: 'rgba(0,0,0,0.6)', 
               backdropFilter: 'blur(4px)',
-              border: '1px solid rgba(255,255,255,0.2)'
+              border: '1px solid rgb(var(--aegis-overlay) / 0.2)'
             }}
           >
             <Play size={24} className="text-white ms-1" fill="white" />
@@ -201,30 +202,30 @@ export function ChatVideo({ src, alt, maxWidth = '100%', maxHeight = '400px', cl
           <button
             onClick={toggleMute}
             className="p-1.5 rounded-lg backdrop-blur-sm transition-all"
-            style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.1)' }}
+            style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgb(var(--aegis-overlay) / 0.1)' }}
             title={muted ? 'تشغيل الصوت' : 'كتم الصوت'}
           >
             {muted ? (
-              <VolumeX size={14} className="text-white/70 hover:text-white" />
+              <VolumeX size={14} className="text-aegis-text hover:text-white" />
             ) : (
-              <Volume2 size={14} className="text-white/70 hover:text-white" />
+              <Volume2 size={14} className="text-aegis-text hover:text-white" />
             )}
           </button>
           <button
             onClick={handleSave}
             className="p-1.5 rounded-lg backdrop-blur-sm transition-all"
-            style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.1)' }}
+            style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgb(var(--aegis-overlay) / 0.1)' }}
             title="حفظ الفيديو"
           >
-            <Download size={14} className="text-white/70 hover:text-white" />
+            <Download size={14} className="text-aegis-text hover:text-white" />
           </button>
           <button
             onClick={handleFullscreen}
             className="p-1.5 rounded-lg backdrop-blur-sm transition-all"
-            style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.1)' }}
+            style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgb(var(--aegis-overlay) / 0.1)' }}
             title="ملء الشاشة"
           >
-            <Maximize2 size={14} className="text-white/70 hover:text-white" />
+            <Maximize2 size={14} className="text-aegis-text hover:text-white" />
           </button>
         </span>
       )}
@@ -239,7 +240,7 @@ export function ChatVideo({ src, alt, maxWidth = '100%', maxHeight = '400px', cl
             backdropFilter: 'blur(4px)'
           }}
         >
-          <button onClick={togglePlay} className="text-white/70 hover:text-white">
+          <button onClick={togglePlay} className="text-aegis-text hover:text-white">
             <Pause size={16} />
           </button>
         </span>
@@ -247,7 +248,7 @@ export function ChatVideo({ src, alt, maxWidth = '100%', maxHeight = '400px', cl
 
       {/* Alt text / caption */}
       {alt && alt !== 'video' && (
-        <span className="text-[11px] text-white/25 mt-1" style={{ display: 'block' }}>{alt}</span>
+        <span className="text-[11px] text-aegis-text-muted mt-1" style={{ display: 'block' }}>{alt}</span>
       )}
     </span>
   );

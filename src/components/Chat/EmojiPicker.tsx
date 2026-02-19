@@ -54,7 +54,7 @@ export function EmojiPicker({ onSelect, disabled }: EmojiPickerProps) {
           'p-2 rounded-xl transition-colors',
           open
             ? 'bg-aegis-primary/20 text-aegis-primary'
-            : 'hover:bg-white/[0.04] text-aegis-text-dim hover:text-aegis-text-muted',
+            : 'hover:bg-[rgb(var(--aegis-overlay)/0.04)] text-aegis-text-dim hover:text-aegis-text-muted',
           'disabled:opacity-30'
         )}
         title={t('input.emoji')}
@@ -75,7 +75,7 @@ export function EmojiPicker({ onSelect, disabled }: EmojiPickerProps) {
                 onSelect(emoji.native);
                 setOpen(false);
               }}
-              theme="dark"
+              theme={document.documentElement.classList.contains('light') ? 'light' : 'dark'}
               locale={language}
               previewPosition="none"
               skinTonePosition="search"

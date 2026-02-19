@@ -1011,5 +1011,5 @@ app.on('before-quit', () => {
   (app as any).isQuitting = true;
 });
 
-console.log('🛡️ AEGIS Desktop v5.0 started');
+console.log('🛡️ AEGIS Desktop v5.1 started');
 

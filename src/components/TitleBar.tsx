@@ -301,7 +301,7 @@ export function TitleBar() {
             AEGIS
           </span>
           <span className="text-[10px] text-aegis-text-dim tracking-[1px]">
-            DESKTOP <span className="opacity-50">v5.1</span>
+            DESKTOP <span className="opacity-50">v5.2</span>
           </span>
         </div>
 

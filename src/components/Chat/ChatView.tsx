@@ -1,14 +1,16 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { ArrowDown, Loader2, Shield, Zap } from 'lucide-react';
+import { ArrowDown, Loader2, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useChatStore } from '@/stores/chatStore';
+import { useChatStore, type ChatMessage } from '@/stores/chatStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { gateway } from '@/services/gateway';
 import { MessageBubble } from './MessageBubble';
 import { ToolCallBubble } from './ToolCallBubble';
 import { MessageInput } from './MessageInput';
 import { TypingIndicator } from './TypingIndicator';
+import { InlineButtonBar, extractInlineButtons } from './InlineButtonBar';
+import { QuickReplyBar } from './QuickReplyBar';
 import clsx from 'clsx';
 
 // ═══════════════════════════════════════════════════════════
@@ -59,13 +61,17 @@ function CompactDivider({ timestamp }: { timestamp?: string }) {
 
 export function ChatView() {
   const { t } = useTranslation();
-  const { messages, isTyping, connected, connecting, connectionError, isLoadingHistory, setMessages, setIsLoadingHistory, activeSessionKey, cacheMessagesForSession, getCachedMessages, tokenUsage, addMessage, setHistoryLoader } = useChatStore();
+  const { messages, isTyping, connected, connecting, connectionError, isLoadingHistory, setMessages, setIsLoadingHistory, activeSessionKey, cacheMessagesForSession, getCachedMessages, tokenUsage, addMessage, setHistoryLoader, quickReplies, setQuickReplies } = useChatStore();
   const toolIntentEnabled = useSettingsStore((s) => s.toolIntentEnabled);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const prevCompactionsRef = useRef<number>(-1);
+
+  // ── Clarify Card state (auto-detection disabled — triggered too many false positives) ──
+  // ClarifyCard is kept for future use with official inline buttons from Gateway
+  // const [clarifyQuestion, setClarifyQuestion] = useState<ClarifyQuestion | null>(null);
 
   const scrollToBottom = useCallback((smooth = true) => {
     bottomRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant' });
@@ -127,12 +133,28 @@ export function ChatView() {
     /^احفظ جميع المعلومات المهمة/, /^⚠️ Session nearing compaction/,
     /^\[System\]/i, /^System:\s*\[/, /^PS [A-Z]:\\.*>/,
     /^node scripts\/build/, /^npx electron/, /^Ctrl\+[A-Z]/,
+    // Desktop-injected metadata blocks
+    /^Conversation info \(untrusted metadata\)/i,
+    /^\[AEGIS_DESKTOP_CONTEXT\]/i,
+    /^\[AEGIS:RASHID\]/i,
   ];
 
   const isNoise = (text: string): boolean => {
     const trimmed = text.trim();
     if (!trimmed) return true;
     return NOISE_PATTERNS.some((p) => p.test(trimmed));
+  };
+
+  // Strip injected metadata from user messages for clean display
+  const stripUserMeta = (text: string): string => {
+    let clean = text;
+    // Remove [AEGIS_DESKTOP_CONTEXT]...[/AEGIS_DESKTOP_CONTEXT] block
+    clean = clean.replace(/\[AEGIS_DESKTOP_CONTEXT\][\s\S]*?\[\/AEGIS_DESKTOP_CONTEXT\]\s*/i, '');
+    // Remove Conversation info JSON block
+    clean = clean.replace(/Conversation info \(untrusted metadata\):\s*```json\s*\{[\s\S]*?\}\s*```\s*/i, '');
+    // Remove inline [Sat 2026-...] timestamp prefixes
+    clean = clean.replace(/^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+UTC\]\s*/i, '');
+    return clean.trim();
   };
 
   const loadHistory = useCallback(async () => {
@@ -212,11 +234,16 @@ export function ChatView() {
             if (hasOnlyTools) return null;
           }
           if (msg.toolCallId || msg.tool_call_id) return null;
-          if (isNoise(content)) return null;
+          if (role === 'assistant' && isNoise(content)) return null;
+
+          // Clean user messages — strip injected Desktop context & metadata
+          const displayContent = role === 'user' ? stripUserMeta(content) : content;
+          if (!displayContent) return null;
+
           return {
             id: msg.id || msg.messageId || `hist-${Math.random().toString(36).slice(2)}`,
             role: role as 'user' | 'assistant',
-            content,
+            content: displayContent,
             timestamp: msg.timestamp || msg.createdAt || new Date().toISOString(),
             mediaUrl: msg.mediaUrl || undefined,
           };
@@ -240,8 +267,14 @@ export function ChatView() {
     finally { setTimeout(() => setIsRefreshing(false), 500); }
   }, [isRefreshing, isLoadingHistory, loadHistory]);
 
-  // History loads only on user action (Refresh or send message)
-  // — NOT automatically on connect, so Welcome screen stays visible on launch
+  // Auto-load history on connect
+  const hasLoadedRef = useRef(false);
+  useEffect(() => {
+    if (connected && !hasLoadedRef.current && messages.length === 0) {
+      hasLoadedRef.current = true;
+      loadHistory();
+    }
+  }, [connected, messages.length, loadHistory]);
 
   // Register loadHistory in store so MessageInput can trigger it before first send
   useEffect(() => {
@@ -294,27 +327,44 @@ export function ChatView() {
             <p className="text-aegis-text-muted text-[13px]">{t('chat.loadingHistory')}</p>
           </div>
         ) : messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center px-8">
-            <div className="relative mb-8">
-              <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-aegis-primary/15 to-aegis-accent/10 flex items-center justify-center border border-[rgb(var(--aegis-overlay)/0.08)] shadow-[0_0_32px_rgb(var(--aegis-primary)/0.15)] animate-glow-pulse">
-                <Shield size={36} className="text-aegis-primary" />
-              </div>
-              <div className="absolute inset-0 w-20 h-20 rounded-3xl border border-aegis-primary/5 animate-pulse-ring" />
-            </div>
-            <h2 className="text-xl font-semibold text-aegis-text mb-1.5 tracking-tight">AEGIS Desktop</h2>
-            <p className="text-gradient text-[13px] font-medium mb-3">{t('app.fullName')}</p>
-            <p className="text-aegis-text-dim text-[12px]">
-              {connected ? t('connection.connectedReady') : t('connection.waitingConnection')}
-            </p>
-          </div>
+          <div className="flex-1" />
         ) : (
           <div className="space-y-0.5">
             {messages.map((msg) => {
               if (msg.role === 'compaction') {
                 return <CompactDivider key={msg.id} timestamp={msg.timestamp} />;
               }
-              // Tool messages — only render when Tool Intent View is enabled; skip otherwise
+              // Tool messages — check for inline buttons first, then normal tool display
               if ((msg.role as string) === 'tool') {
+                // Always show inline buttons from `message` tool, regardless of toolIntentEnabled
+                const inlineButtons = extractInlineButtons(msg.toolName || '', msg.toolInput);
+                if (inlineButtons) {
+                  return (
+                    <InlineButtonBar
+                      key={msg.id}
+                      buttons={inlineButtons}
+                      onCallback={async (callbackData) => {
+                        const text = callbackData;
+                        const userMsg: ChatMessage = {
+                          id: `user-${Date.now()}`,
+                          role: 'user',
+                          content: text,
+                          timestamp: new Date().toISOString(),
+                        };
+                        addMessage(userMsg);
+                        const { setIsTyping } = useChatStore.getState();
+                        setIsTyping(true);
+                        try {
+                          await gateway.sendMessage(text, undefined, activeSessionKey);
+                        } catch (err) {
+                          console.error('[InlineButtons] Send error:', err);
+                        }
+                      }}
+                    />
+                  );
+                }
+
+                // Normal tool calls — only show when Tool Intent View is enabled
                 if (!toolIntentEnabled) return null;
                 return (
                   <ToolCallBubble
@@ -348,6 +398,36 @@ export function ChatView() {
             <span>{t('chat.newMessages')}</span>
           </button>
         </div>
+      )}
+
+      {/* Quick Reply buttons — from [[button:...]] markers in AI response */}
+      {quickReplies.length > 0 && !isTyping && (
+        <QuickReplyBar
+          buttons={quickReplies}
+          onSend={async (text) => {
+            // Clear buttons immediately
+            setQuickReplies([]);
+
+            // Add user message to chat
+            const userMsg: ChatMessage = {
+              id: `user-${Date.now()}`,
+              role: 'user',
+              content: text,
+              timestamp: new Date().toISOString(),
+            };
+            addMessage(userMsg);
+
+            // Send via gateway
+            const { setIsTyping } = useChatStore.getState();
+            setIsTyping(true);
+            try {
+              await gateway.sendMessage(text, undefined, activeSessionKey);
+            } catch (err) {
+              console.error('[QuickReplyBar] Send error:', err);
+            }
+          }}
+          onDismiss={() => setQuickReplies([])}
+        />
       )}
 
       <MessageInput />

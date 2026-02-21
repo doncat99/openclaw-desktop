@@ -10,7 +10,7 @@
 ![Electron](https://img.shields.io/badge/Electron-34-47848F?logo=electron&logoColor=white)
 ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white)
-![OpenClaw](https://img.shields.io/badge/OpenClaw-2026.2.17-blueviolet)
+![OpenClaw](https://img.shields.io/badge/OpenClaw-2026.2.19-blueviolet)
 
 ---
 
@@ -19,6 +19,7 @@
 OpenClaw is powerful — but managing it through a terminal or basic UI leaves a lot on the table. AEGIS Desktop gives it a proper home:
 
 - 💬 **Chat** — streaming responses, artifacts, images, voice, and multi-tab sessions
+- 🔘 **Smart Quick Replies** — clickable buttons when the AI needs your decision
 - 📊 **Analytics** — see exactly what you're spending and where, broken down by model and agent
 - 🤖 **Agent Hub** — manage all your agents from a single panel
 - ⏰ **Cron Monitor** — schedule and control jobs visually
@@ -32,6 +33,7 @@ If you run OpenClaw, AEGIS Desktop is the UI it deserves.
 
 - [Screenshots](#-screenshots)
 - [Features](#-features)
+- [What's New in v5.2](#-whats-new-in-v52)
 - [What's New in v5.1](#-whats-new-in-v51)
 - [How It Works](#-how-it-works)
 - [Installation](#-installation)
@@ -44,6 +46,9 @@ If you run OpenClaw, AEGIS Desktop is the UI it deserves.
 
 ### 💬 Chat
 ![Chat](screenshots/chat.gif)
+
+### 🔘 Smart Quick Reply Buttons
+![Quick Replies](screenshots/quick-replies.gif)
 
 ### 🌑 Dark Mode — All Pages
 ![Dark Mode](screenshots/pages-dark.gif)
@@ -64,7 +69,8 @@ If you run OpenClaw, AEGIS Desktop is the UI it deserves.
 - **`Promise.allSettled`** — individual API failures don't break the page
 
 ### 💬 Chat
-- **Welcome Screen** — AEGIS shield + branding on launch, loads session on first interaction
+- **Auto-load history** — previous conversation loads automatically on connect
+- **Smart Quick Replies** — AI can present clickable buttons via `[[button:Label]]` markers for quick decisions
 - **Multi-tab sessions** — open multiple chats with `Ctrl+Tab` switching
 - **Streaming responses** with real-time markdown rendering
 - **Image support** — paste, drag & drop, or upload images (inline base64)
@@ -78,6 +84,7 @@ If you run OpenClaw, AEGIS Desktop is the UI it deserves.
 - **Compaction Divider** — animated shimmer separator when context is compressed
 - **Message Queue** — messages buffer during disconnect and auto-send on reconnect
 - **Auto Code Detection** — syntax highlighting with `oneLight`/`oneDark` auto-switching based on theme
+- **Clean history display** — injected metadata is stripped from user messages for a clean chat view
 
 ### 🎨 Artifacts Preview
 - **Separate preview window** for interactive content
@@ -95,7 +102,8 @@ If you run OpenClaw, AEGIS Desktop is the UI it deserves.
 - **Agent breakdown** — per-agent usage stats
 - **Token breakdown** — input/output/cache distribution
 - **Daily breakdown table** — sortable rows with cost per day
-- **Date Range Picker** — 6 presets + custom range
+- **Date Range Picker** — 6 presets + custom range with Apply/Save workflow
+- **Tiered fetching** — starts with 30 days, loads more on demand (90d → 365d)
 - **Export** — CSV download or copy summary to clipboard
 - **Smart cache** — stale-while-revalidate in localStorage
 
@@ -112,6 +120,7 @@ If you run OpenClaw, AEGIS Desktop is the UI it deserves.
 - **Run History** — expandable view showing last 10 runs per job
 - **Human-readable schedules** — "Every 6h", "Daily at 9:00 PM"
 - **Templates** — 4 ready-made templates (Morning Briefing, Weekly Digest, Check-In, System Health)
+- **Disabled jobs visible** — uses `includeDisabled: true` to show paused jobs
 
 ### 📋 Workshop (Kanban)
 - **Drag & Drop** task board with Queue / In Progress / Done columns
@@ -166,7 +175,8 @@ If you run OpenClaw, AEGIS Desktop is the UI it deserves.
 ### 🔐 Security
 - **Ed25519 Device Identity** — auto-generated keypair for gateway authentication
 - **Challenge-response handshake** — secure WebSocket connection
-- **Sandboxed artifact preview** — CSP-protected iframe
+- **`webSecurity: true` always** — Origin rewrite handles `file://` connections without disabling security
+- **Sandboxed artifact preview** — CSP-protected iframe with `sandbox: true`
 - **No hardcoded credentials** — token saved locally via IPC
 
 ### 🎨 Design
@@ -182,6 +192,37 @@ If you run OpenClaw, AEGIS Desktop is the UI it deserves.
 
 ---
 
+## 🆕 What's New in v5.2
+
+### New Features
+- **Smart Quick Reply Buttons** — AI can present clickable button chips via `[[button:Label]]` markers when it needs a decision. Works with any AI model — no gateway config required. Buttons auto-dismiss after click or manual send.
+
+  ![Quick Replies](screenshots/quick-replies.gif)
+
+- **Auto-load chat history** — previous conversation loads automatically when the app connects (no more blank welcome screen)
+- **Clean history display** — injected Desktop context and metadata are stripped from user messages for a clean chat view
+- **Dynamic version** — app version is sourced from `package.json` via Vite define plugin (single source of truth)
+- **Optimized system prompt** — AEGIS Desktop context reduced by ~33% (fewer tokens per conversation start)
+
+### Security Improvements
+- **`webSecurity: true` always enabled** — previously disabled in production as a workaround for `file://` → `ws://` connections. Now uses Origin header rewriting for both WebSocket and HTTP requests, keeping `webSecurity` enabled in all environments ([Electron Security: `webSecurity`](https://www.electronjs.org/docs/latest/tutorial/security#6-do-not-disable-websecurity))
+- **Broader Origin rewrite** — covers `ws://`, `wss://`, `http://`, and `https://` (previously WebSocket only). Only rewrites when Origin is `null` or `file://` (packaged app)
+
+### Fixes & Improvements
+- **Cron Monitor** — disabled/paused jobs now visible (`includeDisabled: true` parameter)
+- **Full Analytics overhaul:**
+  - `Promise.allSettled` — partial data still displays if one API call fails
+  - Tiered fetching — starts at 30 days, loads 90d/365d on demand
+  - Preset workflow — preset clicks are volatile, Apply button persists the selection
+  - localStorage key versioned (`savedPreset` v2) — prevents stale values from old versions
+  - Cache timestamp bug fixed (`.ts` → `.timestamp`)
+  - "This Month" preset now includes day 31
+  - "All Time" uses server totals directly (no `hasAllData` guard)
+- **User messages in history** — noise filter now only applies to assistant messages (was incorrectly hiding user messages containing Desktop metadata)
+- **Duplicate `call()` method** removed from gateway client
+
+---
+
 ## 🆕 What's New in v5.1
 
 ### New Features
@@ -192,7 +233,6 @@ If you run OpenClaw, AEGIS Desktop is the UI it deserves.
 - **Tool Intent View** — see what tools the AI is calling with collapsible cards (toggle in Settings)
 - **Light Mode** — complete light theme with custom palette, auto-switching code blocks
 - **Theme System** — full CSS variable architecture (`--aegis-*` tokens), zero hardcoded colors
-- **Welcome Screen** — AEGIS branding on launch, chat loads only on first interaction
 - **1M Context Toggle** — enable extended context window in Settings (Anthropic API)
 - **`gateway.call()`** — public RPC method for direct gateway communication
 
@@ -230,7 +270,7 @@ OpenClaw Gateway (local or remote)
 
 | Page | Source |
 |------|--------|
-| Chat history | `gateway.getHistory()` — loaded on demand |
+| Chat history | `gateway.getHistory()` — loaded automatically on connect |
 | Cost & tokens | `gateway.getCostSummary(days)` |
 | Sessions | `gateway.getSessions()` |
 | Agents | `gateway.getAgents()` |
@@ -244,67 +284,59 @@ AEGIS Desktop requires a running **OpenClaw Gateway** instance. On first launch,
 
 ### 🤖 Model Awareness (System Prompt)
 
-AEGIS Desktop injects a context block at the start of each conversation so the AI model knows it's running inside the app and can use its features.
+AEGIS Desktop injects a context block at the start of each conversation so the AI model knows it's running inside the app and can use its features (artifacts, workshop commands, quick replies).
 
 <details>
 <summary>View injected context</summary>
 
 ```
 [AEGIS_DESKTOP_CONTEXT]
-You are connected via AEGIS Desktop — an Electron-based chat client with rich capabilities.
+You are connected via AEGIS Desktop — an Electron-based OpenClaw Gateway client.
 
 CAPABILITIES:
-- User can attach: images (inline base64), files (sent as paths), screenshots, voice messages
-- You can send: markdown, images (![](url)), videos (![](url.mp4))
-- All markdown is rendered with syntax highlighting, tables, and RTL/LTR auto-detection
-- The interface is bilingual (Arabic/English) with automatic text direction
+- User can attach: images (base64), files (as paths), screenshots, voice messages
+- You can send: markdown (syntax highlighting, tables, RTL/LTR auto-detection), images, videos
+- The interface supports dark/light themes and bilingual Arabic/English layout
 
 ARTIFACTS (opens in a separate preview window):
-When asked for interactive content (dashboards, games, charts, UIs, diagrams), wrap it in:
-<aegis_artifact type="TYPE" title="Descriptive Title">
-  ...content...
-</aegis_artifact>
+For interactive content, wrap in:
+<aegis_artifact type="TYPE" title="Title">...content...</aegis_artifact>
 
-Supported types:
-- html: Full HTML page (CSS/JS inline)
-- react: React component with JSX (React 18 + Babel pre-loaded)
-- svg: Raw SVG markup
-- mermaid: Mermaid diagram syntax
+Types: html | react | svg | mermaid
 
-FILE REFERENCES:
-- Non-image files arrive as: 📎 file: <path> (mime/type, size)
-- Voice messages arrive as: 🎤 [voice] <path> (duration)
+WORKSHOP (Kanban task management):
+- [[workshop:add title="Task" priority="high|medium|low" description="Desc" agent="Name"]]
+- [[workshop:move id="ID" status="queue|inProgress|done"]]
+- [[workshop:delete id="ID"]]
+- [[workshop:progress id="ID" value="0-100"]]
 
-WORKSHOP (task management — Kanban board):
-- Add task:        [[workshop:add title="..." priority="high|medium|low"]]
-- Move task:       [[workshop:move id="..." status="queue|inProgress|done"]]
-- Delete task:     [[workshop:delete id="..."]]
-- Update progress: [[workshop:progress id="..." value="0-100"]]
-- List tasks:      [[workshop:list]]
+QUICK REPLIES (clickable buttons):
+Add [[button:Label]] at the END of your message when you need a decision.
+- Max 2-5 buttons. ONLY for decisions that block your next step.
 [/AEGIS_DESKTOP_CONTEXT]
 ```
 
 </details>
 
-This context is injected once per conversation and not shown in the chat UI. The model uses it to render artifacts in the preview window, handle file and voice references correctly, and manage Workshop tasks via text commands.
+This context is injected once per conversation and not shown in the chat UI. The model uses it to render artifacts in the preview window, manage Workshop tasks via text commands, and present quick reply buttons when it needs a decision from the user.
 
 ---
 
 ## 📦 Installation
 
-1. Download `AEGIS-Desktop-Setup-5.1.0.exe` from [Releases](../../releases)
+1. Download `AEGIS-Desktop-Setup-5.2.0.exe` from [Releases](../../releases)
 2. Run the installer — choose your language (Arabic / English)
 3. Make sure [OpenClaw](https://github.com/openclaw/openclaw) Gateway is running
 4. On first launch, pair with your gateway (one-time setup)
 
 ### Portable
 
-Download `AEGIS-Desktop-5.1.0.exe` — runs without installation.
+Download `AEGIS-Desktop-5.2.0.exe` — runs without installation.
 
 ### Requirements
 
 - Windows 10/11
-- [OpenClaw](https://github.com/openclaw/openclaw) v2026.2.17 or later
+- [OpenClaw](https://github.com/openclaw/openclaw) v2026.2.19 or later
 - OpenClaw Gateway running locally or remotely
 
 ---

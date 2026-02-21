@@ -105,6 +105,10 @@ interface ChatState {
   historyLoader: (() => Promise<void>) | null;
   setHistoryLoader: (fn: (() => Promise<void>) | null) => void;
 
+  // Quick Replies (from [[button:...]] markers)
+  quickReplies: Array<{ text: string; value: string }>;
+  setQuickReplies: (buttons: Array<{ text: string; value: string }>) => void;
+
   // Connection
   connected: boolean;
   connecting: boolean;
@@ -295,6 +299,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   drafts: {},
   setDraft: (key, text) => set((state) => ({ drafts: { ...state.drafts, [key]: text } })),
   getDraft: (key) => get().drafts[key] || '',
+
+  // ── Quick Replies ──
+  quickReplies: [],
+  setQuickReplies: (buttons) => set({ quickReplies: buttons }),
 
   // ── Connection ──
   connected: false,

@@ -299,7 +299,7 @@ async function fetchCron() {
   const store = useGatewayDataStore.getState();
   store.setLoading('cron', true);
   try {
-    const res = await gw.call('cron.list', {});
+    const res = await gw.call('cron.list', { includeDisabled: true });
     const list = Array.isArray(res?.jobs) ? res.jobs
                : Array.isArray(res) ? res : [];
     store.setCronJobs(list);

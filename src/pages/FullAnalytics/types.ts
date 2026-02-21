@@ -80,8 +80,9 @@ export type PresetId =
 
 export interface DateRangePickerProps {
   activePreset: PresetId;
+  savedPreset: PresetId;
   startDate: string;
   endDate: string;
   onPresetSelect: (id: PresetId, start: string, end: string) => void;
-  onCustomApply: (start: string, end: string) => void;
+  onApply: (customStart?: string, customEnd?: string) => void;
 }

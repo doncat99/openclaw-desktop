@@ -104,6 +104,8 @@ export function MessageInput() {
     setText('');
     setFiles([]);
     setIsTyping(true);
+    // Clear quick reply buttons when user sends manually
+    useChatStore.getState().setQuickReplies([]);
 
     try {
       await gateway.sendMessage(fullMessage || '', attachments.length > 0 ? attachments : undefined, activeSessionKey);
@@ -310,7 +312,7 @@ export function MessageInput() {
             ))}
 
             {/* Text Input */}
-            <textarea ref={textareaRef} value={text} onChange={(e) => setText(e.target.value)}
+            <textarea ref={textareaRef} data-input="message" value={text} onChange={(e) => setText(e.target.value)}
               onKeyDown={handleKeyDown} onPaste={handlePaste}
               placeholder={connected ? t('input.placeholder') : t('input.placeholderDisconnected')}
               disabled={!connected}

@@ -232,22 +232,26 @@ function createWindow(): void {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: isDev,  // Disable in production (file:// needs to connect to ws://localhost)
+      webSecurity: true,  // Always enabled — Origin rewrite handles file:// → ws:// below
     },
     show: false,
   });
 
-  // Rewrite Origin header for WebSocket connections (file:// → localhost)
-  // This allows the packaged app to connect to any Gateway without config changes
+  // Rewrite Origin header for WebSocket + HTTP connections (file:// → localhost)
+  // This allows the packaged app (file:// origin) to connect to any Gateway
+  // without disabling webSecurity
   mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
-    { urls: ['ws://*/*', 'wss://*/*'] },
+    { urls: ['ws://*/*', 'wss://*/*', 'http://*/*', 'https://*/*'] },
     (details, callback) => {
-      // Extract gateway host from the URL and set it as origin
-      try {
-        const wsUrl = new URL(details.url);
-        details.requestHeaders['Origin'] = `http://${wsUrl.hostname}:${wsUrl.port}`;
-      } catch {
-        details.requestHeaders['Origin'] = 'http://127.0.0.1:18789';
+      // Only rewrite Origin when it's null/file (packaged app)
+      const origin = details.requestHeaders['Origin'];
+      if (!origin || origin === 'null' || origin.startsWith('file://')) {
+        try {
+          const url = new URL(details.url);
+          details.requestHeaders['Origin'] = `http://${url.hostname}:${url.port || (url.protocol === 'https:' ? '443' : '80')}`;
+        } catch {
+          details.requestHeaders['Origin'] = 'http://127.0.0.1:18789';
+        }
       }
       callback({ requestHeaders: details.requestHeaders });
     }
@@ -1011,5 +1015,5 @@ app.on('before-quit', () => {
   (app as any).isQuitting = true;
 });
 
-console.log('🛡️ AEGIS Desktop v5.1 started');
+console.log('🛡️ AEGIS Desktop v5.2 started');
 

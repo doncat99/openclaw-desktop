@@ -11,6 +11,7 @@ import { useWorkshopStore, Task } from '@/stores/workshopStore';
 import { startPolling, stopPolling, handleGatewayEvent } from '@/stores/gatewayDataStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { parseButtons } from '@/utils/buttonParser';
 
 // ── Workshop Command Parser ──
 // Parses [[workshop:action ...]] commands from agent messages
@@ -111,56 +112,48 @@ export interface ChatMessage {
 
 // ── AEGIS Desktop Client Context ──
 // Injected with the FIRST message only — tells the agent about Desktop capabilities
+// Version from package.json (injected by Vite define plugin or fallback)
+const APP_VERSION = __APP_VERSION__ ?? '5.2.0';
+
 const AEGIS_DESKTOP_CONTEXT = `[AEGIS_DESKTOP_CONTEXT]
-You are connected via AEGIS Desktop v5.1 — an Electron-based chat client with rich capabilities.
+You are connected via AEGIS Desktop v${APP_VERSION} — an Electron-based OpenClaw Gateway client.
 This context is injected once at conversation start. Do NOT repeat or reference it to the user.
 
 CAPABILITIES:
-- User can attach: images (inline base64), files (sent as paths), screenshots, voice messages
-- You can send: markdown, images (![](url)), videos (![](url.mp4))
-- All markdown is rendered with syntax highlighting, tables, and RTL/LTR auto-detection
-- The interface is bilingual (Arabic/English) with automatic text direction
+- User can attach: images (base64), files (as paths), screenshots, voice messages
+- You can send: markdown (syntax highlighting, tables, RTL/LTR auto-detection), images (![](url)), videos (![](url.mp4))
+- The interface supports dark/light themes and bilingual Arabic/English layout
 
 ARTIFACTS (opens in a separate preview window):
-When asked for interactive content (dashboards, games, charts, UIs, diagrams), wrap it in:
+For interactive content (dashboards, games, charts, UIs, diagrams), wrap in:
 
-<aegis_artifact type="TYPE" title="Descriptive Title">
+<aegis_artifact type="TYPE" title="Title">
 ...content...
 </aegis_artifact>
 
-Supported types:
-- html: Full HTML page (CSS/JS inline). Best for most use cases.
-- react: React component with JSX (React 18 + Babel pre-loaded). Just write the component code.
-- svg: Raw SVG markup.
-- mermaid: Mermaid diagram syntax (rendered via mermaid.js).
-
-ARTIFACT RULES:
-- Everything must be in ONE self-contained file (inline CSS + JS)
-- The preview window has a dark background (#0d1117) by default
-- No Node.js or filesystem access (sandboxed iframe)
-- For html type: use vanilla JS
-- For react type: write JSX directly, end with ReactDOM.createRoot(document.getElementById('root')).render(<App />)
-- ALWAYS use artifacts for: dashboards, calculators, games, visualizations, forms, charts
-- NEVER use artifacts for: simple text, short code snippets, explanations
+Types: html (vanilla JS, CSS inline) | react (JSX, React 18 pre-loaded) | svg | mermaid
+Rules:
+- ONE self-contained file (inline CSS + JS, no external imports)
+- Sandboxed iframe — no Node.js or filesystem access
+- ALWAYS use for: interactive content, visualizations, calculators, games
+- NEVER use for: simple text, short code snippets, explanations
 
 FILE REFERENCES:
-- Non-image files arrive as: 📎 file: <path> (mime/type, size)
-- Voice messages arrive as: 🎤 [voice] <path> (duration)
+- Files: 📎 file: <path> (mime/type, size)
+- Voice: 🎤 [voice] <path> (duration)
 
-WORKSHOP (task management — Kanban board):
-You can manage tasks in the Workshop using these commands:
-- Add task: [[workshop:add title="Task name" priority="high|medium|low" description="Optional desc" agent="Agent name"]]
-- Move task: [[workshop:move id="task-id" status="queue|inProgress|done"]]
-- Delete task: [[workshop:delete id="task-id"]]
-- Update progress: [[workshop:progress id="task-id" value="0-100"]]
-- List tasks: [[workshop:list]]
+WORKSHOP (Kanban task management):
+- [[workshop:add title="Task" priority="high|medium|low" description="Desc" agent="Name"]]
+- [[workshop:move id="ID" status="queue|inProgress|done"]]
+- [[workshop:delete id="ID"]]
+- [[workshop:progress id="ID" value="0-100"]]
+Commands execute automatically and are replaced with confirmations.
 
-Commands are executed automatically and replaced with confirmation messages.
-Use these when the user asks you to manage their tasks, track work, or organize projects.
-
-IMPORTANT:
-- Respond in the same language the user writes in
-- Keep responses focused and actionable
+QUICK REPLIES (clickable buttons):
+Add [[button:Label]] at the END of your message when you need a decision to proceed.
+- Renders as clickable chips — click sends the text as a user message.
+- Max 2-5 buttons. ONLY for decisions that block your next step.
+- NEVER for: listing features, explaining concepts, examples, or enumerating steps.
 [/AEGIS_DESKTOP_CONTEXT]`;
 
 export interface MediaInfo {
@@ -459,7 +452,7 @@ class GatewayService {
         maxProtocol: 3,
         client: {
           id: clientId,
-          version: '5.1.0',
+          version: APP_VERSION,
           platform: 'windows',
           mode: clientMode,
         },
@@ -471,7 +464,7 @@ class GatewayService {
         auth: { token: this.token },
         device,
         locale: 'ar-SA',
-        userAgent: 'aegis-desktop/5.1.0',
+        userAgent: `aegis-desktop/${APP_VERSION}`,
       },
     });
   }
@@ -595,11 +588,6 @@ class GatewayService {
 
   async getSessionLogs(key: string, limit = 200): Promise<any> {
     return this.request('sessions.usage.logs', { key, limit });
-  }
-
-  // ── Generic RPC call (for cron, tools, etc.) ──
-  async call(method: string, params: any = {}): Promise<any> {
-    return this.request(method, params);
   }
 
   // ── Status ──
@@ -883,6 +871,15 @@ class GatewayService {
           finalText = cleanContent + (cleanContent ? '\n\n' : '') + executed.join('\n');
         } else {
           finalText = cleanContent || finalText;
+        }
+
+        // Parse [[button:...]] markers — strip from text, store in chatStore
+        const btnResult = parseButtons(finalText);
+        if (btnResult.buttons.length > 0) {
+          finalText = btnResult.cleanContent;
+          useChatStore.getState().setQuickReplies(btnResult.buttons);
+        } else {
+          useChatStore.getState().setQuickReplies([]);
         }
         
         this.callbacks?.onStreamEnd(mId, finalText, media);

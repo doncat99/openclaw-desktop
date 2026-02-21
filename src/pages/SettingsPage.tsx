@@ -507,7 +507,7 @@ export function SettingsPageFull() {
         <div className="text-center py-4 mb-4">
           <div className="text-3xl mb-2">🛡️</div>
           <div className="text-[14px] font-bold text-aegis-text">AEGIS Desktop</div>
-          <div className="text-[12px] text-aegis-text-dim mt-1">v5.1.0 — Mission Control</div>
+          <div className="text-[12px] text-aegis-text-dim mt-1">v5.2.0 — Mission Control</div>
           <div className="text-[11px] text-aegis-text-dim mt-0.5">Advanced Executive General Intelligence System</div>
         </div>
         <div className="space-y-2 border-t border-aegis-border/15 pt-3">

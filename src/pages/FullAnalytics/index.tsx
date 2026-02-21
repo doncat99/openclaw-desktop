@@ -48,18 +48,20 @@ export function FullAnalyticsPage() {
     totalApiCalls,
     chartData,
     donutData,
+    isRefetching,
+    savedPreset,
     handlePresetSelect,
-    handleCustomApply,
+    handleApply,
     refresh,
   } = useAnalyticsData();
 
   const hasData = !!(costData || usageData);
-  const [refreshing, setRefreshing] = useState(false);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
 
   const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
+    setManualRefreshing(true);
     await refresh();
-    setTimeout(() => setRefreshing(false), 600);
+    setTimeout(() => setManualRefreshing(false), 600);
   }, [refresh]);
 
   // ── Export action handlers (delegate to helpers.ts) ──
@@ -125,7 +127,7 @@ export function FullAnalyticsPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={handleRefresh}
-            disabled={refreshing}
+            disabled={manualRefreshing || isRefetching}
             className="p-1.5 rounded-lg hover:bg-[rgb(var(--aegis-overlay)/0.06)] transition-colors"
             title="Refresh"
           >
@@ -133,7 +135,7 @@ export function FullAnalyticsPage() {
               size={15}
               className={clsx(
                 'text-aegis-text-muted hover:text-aegis-text-secondary transition-colors',
-                refreshing && 'animate-spin text-aegis-accent'
+                (manualRefreshing || isRefetching) && 'animate-spin text-aegis-accent'
               )}
             />
           </button>
@@ -144,10 +146,11 @@ export function FullAnalyticsPage() {
       {/* ══ Date Range Picker ══ */}
       <DateRangePicker
         activePreset={activePreset}
+        savedPreset={savedPreset}
         startDate={startDate}
         endDate={endDate}
         onPresetSelect={handlePresetSelect}
-        onCustomApply={handleCustomApply}
+        onApply={handleApply}
       />
 
       {/* ══ Error banner ══ */}

@@ -22,7 +22,21 @@
     "cron": "المهام الدورية",
     "agents": "الوكلاء",
     "memory": "الذاكرة",
-    "settings": "الإعدادات"
+    "skills": "المهارات",
+    "settings": "الإعدادات",
+    "terminal": "الطرفية"
+  },
+  "skills": {
+    "title": "المهارات",
+    "mySkills": "مهاراتي",
+    "clawHub": "ClawHub",
+    "searchPlaceholder": "ابحث عن مهارات...",
+    "mostDownloaded": "الأكثر تحميلاً",
+    "mostStars": "الأكثر نجوماً",
+    "trending": "الرائجة",
+    "noSkills": "لا توجد مهارات مثبتة",
+    "noSkillsHint": "ثبّت مهارات من ClawHub لتوسيع قدرات الوكيل",
+    "noResults": "لم يتم العثور على مهارات"
   },
   "dashboard": {
     "title": "Mission Control",
@@ -239,5 +253,16 @@
     "toggleLanguage": "Switch to English",
     "toggleNotifications": "تبديل التنبيهات",
     "searchPlaceholder": "ابحث في الأوامر..."
+  },
+  "terminal": {
+    "title": "الطرفية",
+    "notAvailable": "الطرفية متاحة فقط في تطبيق سطح المكتب. تتطلب الطرفية المدمجة Electron و node-pty.",
+    "empty": "لا توجد تبويبات مفتوحة",
+    "newTab": "طرفية جديدة"
+  },
+  "offline": {
+    "title": "غير متصل",
+    "description": "تعذر الاتصال بـ OpenClaw Gateway. سيُعاد الاتصال تلقائياً عندما تكون البوابة متاحة.",
+    "retrying": "جاري محاولة إعادة الاتصال..."
   }
 }

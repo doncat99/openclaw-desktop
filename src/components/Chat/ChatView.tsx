@@ -7,6 +7,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { gateway } from '@/services/gateway';
 import { MessageBubble } from './MessageBubble';
 import { ToolCallBubble } from './ToolCallBubble';
+import { ThinkingBubble } from './ThinkingBubble';
 import { MessageInput } from './MessageInput';
 import { TypingIndicator } from './TypingIndicator';
 import { InlineButtonBar, extractInlineButtons } from './InlineButtonBar';
@@ -61,13 +62,13 @@ function CompactDivider({ timestamp }: { timestamp?: string }) {
 
 export function ChatView() {
   const { t } = useTranslation();
-  const { messages, isTyping, connected, connecting, connectionError, isLoadingHistory, setMessages, setIsLoadingHistory, activeSessionKey, cacheMessagesForSession, getCachedMessages, tokenUsage, addMessage, setHistoryLoader, quickReplies, setQuickReplies } = useChatStore();
+  const { messages, isTyping, connected, connecting, connectionError, isLoadingHistory, setMessages, setIsLoadingHistory, activeSessionKey, cacheMessagesForSession, getCachedMessages, addMessage, setHistoryLoader, quickReplies, setQuickReplies, thinkingText, thinkingRunId } = useChatStore();
   const toolIntentEnabled = useSettingsStore((s) => s.toolIntentEnabled);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
-  const prevCompactionsRef = useRef<number>(-1);
+  // prevCompactionsRef removed — compaction detection moved to gateway.ts (direct agent event)
 
   // ── Clarify Card state (auto-detection disabled — triggered too many false positives) ──
   // ClarifyCard is kept for future use with official inline buttons from Gateway
@@ -79,25 +80,8 @@ export function ChatView() {
 
   useEffect(() => { if (autoScroll) scrollToBottom(); }, [messages, isTyping, autoScroll, scrollToBottom]);
 
-  // ── Real-time compaction detection ──
-  // Watches tokenUsage.compactions counter — when it increases, inject a CompactDivider
-  useEffect(() => {
-    const current = tokenUsage?.compactions ?? 0;
-    if (prevCompactionsRef.current === -1) {
-      // Initial load — just record the baseline
-      prevCompactionsRef.current = current;
-      return;
-    }
-    if (current > prevCompactionsRef.current) {
-      addMessage({
-        id: `compaction-live-${Date.now()}`,
-        role: 'compaction' as any,
-        content: '',
-        timestamp: new Date().toISOString(),
-      });
-    }
-    prevCompactionsRef.current = current;
-  }, [tokenUsage?.compactions, addMessage]);
+  // Real-time compaction detection moved to gateway.ts — direct agent event interception
+  // (no longer relies on polling tokenUsage.compactions counter)
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -380,10 +364,20 @@ export function ChatView() {
                 );
               }
               return (
-                <MessageBubble key={msg.id} message={msg} onResend={msg.role === 'user' ? handleResend : undefined} />
+                <div key={msg.id}>
+                  {/* Finalized thinking — show collapsed bubble above the assistant message */}
+                  {msg.role === 'assistant' && msg.thinkingContent && (
+                    <ThinkingBubble content={msg.thinkingContent} />
+                  )}
+                  <MessageBubble message={msg} onResend={msg.role === 'user' ? handleResend : undefined} />
+                </div>
               );
             })}
           </div>
+        )}
+        {/* Live thinking stream — show above typing indicator when reasoning is active */}
+        {thinkingText && thinkingRunId && (
+          <ThinkingBubble content={thinkingText} isStreaming />
         )}
         {isTyping && <TypingIndicator />}
         <div ref={bottomRef} className="h-1" />

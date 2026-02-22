@@ -10,7 +10,7 @@
 ![Electron](https://img.shields.io/badge/Electron-34-47848F?logo=electron&logoColor=white)
 ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white)
-![OpenClaw](https://img.shields.io/badge/OpenClaw-2026.2.19-blueviolet)
+![OpenClaw](https://img.shields.io/badge/OpenClaw-2026.2.21-blueviolet)
 
 ---
 
@@ -33,6 +33,7 @@ If you run OpenClaw, AEGIS Desktop is the UI it deserves.
 
 - [Screenshots](#-screenshots)
 - [Features](#-features)
+- [What's New in v5.3](#-whats-new-in-v53)
 - [What's New in v5.2](#-whats-new-in-v52)
 - [What's New in v5.1](#-whats-new-in-v51)
 - [How It Works](#-how-it-works)
@@ -49,6 +50,12 @@ If you run OpenClaw, AEGIS Desktop is the UI it deserves.
 
 ### 🔘 Smart Quick Reply Buttons
 ![Quick Replies](screenshots/quick-replies.gif)
+
+### 🔧 Skills Marketplace
+![Skills](screenshots/Skills.gif)
+
+### 💻 Integrated Terminal
+![Terminal](screenshots/Terminal.gif)
 
 ### 🌑 Dark Mode — All Pages
 ![Dark Mode](screenshots/pages-dark.gif)
@@ -122,6 +129,20 @@ If you run OpenClaw, AEGIS Desktop is the UI it deserves.
 - **Templates** — 4 ready-made templates (Morning Briefing, Weekly Digest, Check-In, System Health)
 - **Disabled jobs visible** — uses `includeDisabled: true` to show paused jobs
 
+### 🔧 Skills Marketplace
+- **Browse** 3,286+ skills from ClawHub with vector search
+- **Highlighted Skills** — curated top skills in a visual grid
+- **Categories** — filter by category with pill-style chips
+- **Detail Panel** — description, version, stats, and `clawhub install` command with copy button
+- **My Skills** — view locally installed skills
+
+### 💻 Integrated Terminal
+- **Real shell** — PowerShell (Windows) or Bash (Linux/Mac) via xterm.js + node-pty
+- **Multi-tab** — open multiple terminal tabs
+- **Auto-resize** — adapts to window size
+- **Clickable links** — URLs in terminal output are clickable
+- **Graceful fallback** — shows "not available" message if native module isn't loaded
+
 ### 📋 Workshop (Kanban)
 - **Drag & Drop** task board with Queue / In Progress / Done columns
 - **Task cards** with priority badges, descriptions, and agent assignments
@@ -189,6 +210,31 @@ If you run OpenClaw, AEGIS Desktop is the UI it deserves.
 - **Auto-reconnect** with exponential backoff
 - **Activity-based heartbeat** — detects dead connections within 45s
 - **Offline message queue** — buffers messages, auto-flushes on reconnect
+
+---
+
+## 🆕 What's New in v5.3
+
+### New Features
+- **Skills Page** — Browse and search 3,286+ skills from the ClawHub marketplace. Vector-powered search, category filters, detail panel with `clawhub install` command, and a My Skills view for locally installed skills.
+
+  ![Skills](screenshots/Skills.gif)
+
+- **Integrated Terminal** — Full PowerShell/Bash terminal inside the app, powered by xterm.js and node-pty. Multi-tab support, auto-resize, clickable links, and graceful fallback if the native module isn't available.
+
+  ![Terminal](screenshots/Terminal.gif)
+
+- **Pairing UX** — Auto-detects when the Gateway requires pairing. Shows clear CLI approval instructions (`openclaw pairing approve`) with automatic retry, cancel option, and manual token entry.
+
+- **Connection Settings** — Gateway URL and Token are now editable from the Settings page. The app works for any user without requiring an external config file.
+
+### Fixes & Improvements
+- **Cron Monitor** — 12 performance fixes including ref-based caching, batched loading, responsive grid, and reduced tick interval
+- **Table Overflow** — Wide markdown tables now scroll horizontally instead of breaking the chat bubble
+- **CompactDivider** — Context compaction is now detected instantly from agent events instead of unreliable polling
+- **CSP Fix** — Google Fonts (IBM Plex Sans Arabic) no longer blocked by Content Security Policy
+- **PTY Crash Fix** — "Object has been destroyed" error on app close resolved
+- **Thinking Stream UI** — Reasoning bubble ready for when Gateway adds WebSocket reasoning support
 
 ---
 
@@ -324,19 +370,19 @@ This context is injected once per conversation and not shown in the chat UI. The
 
 ## 📦 Installation
 
-1. Download `AEGIS-Desktop-Setup-5.2.0.exe` from [Releases](../../releases)
+1. Download `AEGIS-Desktop-Setup-5.3.0.exe` from [Releases](../../releases)
 2. Run the installer — choose your language (Arabic / English)
 3. Make sure [OpenClaw](https://github.com/openclaw/openclaw) Gateway is running
 4. On first launch, pair with your gateway (one-time setup)
 
 ### Portable
 
-Download `AEGIS-Desktop-5.2.0.exe` — runs without installation.
+Download `AEGIS-Desktop-5.3.0.exe` — runs without installation.
 
 ### Requirements
 
 - Windows 10/11
-- [OpenClaw](https://github.com/openclaw/openclaw) v2026.2.19 or later
+- [OpenClaw](https://github.com/openclaw/openclaw) v2026.2.21 or later
 - OpenClaw Gateway running locally or remotely
 
 ---

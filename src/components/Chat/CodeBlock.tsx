@@ -26,12 +26,17 @@ function buildTheme(base: Record<string, any>) {
       fontSize: '0.87em',
       direction: 'ltr' as const,
       textAlign: 'left' as const,
+      whiteSpace: 'pre-wrap' as const,
+      wordBreak: 'break-word' as const,
+      overflowWrap: 'break-word' as const,
     },
     'code[class*="language-"]': {
       ...base['code[class*="language-"]'],
       background: 'transparent',
       direction: 'ltr' as const,
       textAlign: 'left' as const,
+      whiteSpace: 'pre-wrap' as const,
+      wordBreak: 'break-word' as const,
     },
   };
 }

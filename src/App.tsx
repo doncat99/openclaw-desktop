@@ -9,6 +9,8 @@ import { FullAnalyticsPage } from '@/pages/FullAnalytics';
 import { CronMonitorPage } from '@/pages/CronMonitor';
 import { AgentHubPage } from '@/pages/AgentHub';
 import { MemoryExplorerPage } from '@/pages/MemoryExplorer';
+import { SkillsPage as SkillsPageFull } from '@/pages/SkillsPage';
+import { TerminalPage } from '@/pages/TerminalPage';
 import { SettingsPageFull } from '@/pages/SettingsPage';
 import { PairingScreen } from '@/components/PairingScreen';
 import { useChatStore } from '@/stores/chatStore';
@@ -153,12 +155,6 @@ export default function App() {
       onMessage: (msg) => {
         setIsTyping(false);
         addMessage(msg);
-        // Notify if window not focused
-        notifications.notifyIfBackground({
-          title: 'AEGIS',
-          body: msg.content.substring(0, 100),
-          tag: 'aegis-message',
-        });
         useNotificationStore.getState().addNotification({
           type: 'message',
           title: 'رسالة جديدة',
@@ -171,12 +167,6 @@ export default function App() {
       onStreamEnd: (messageId, content, media) => {
         finalizeStreamingMessage(messageId, content, media ? { mediaUrl: media.mediaUrl, mediaType: media.mediaType } : undefined);
         loadTokenUsage();
-        // Notify task completion if in background
-        notifications.notifyIfBackground({
-          title: 'AEGIS ✓',
-          body: content.substring(0, 100),
-          tag: 'aegis-complete',
-        });
         useNotificationStore.getState().addNotification({
           type: 'task_complete',
           title: 'اكتمل الرد',
@@ -230,11 +220,24 @@ export default function App() {
   }, []);
 
   const initConnection = async () => {
+    const DEFAULT_URL = 'ws://127.0.0.1:18789';
+
+    // Priority: Settings Store (user override) → Electron config → fallback
+    // Settings fields are empty by default — only override when user explicitly fills them
+    const settings = useSettingsStore.getState();
+    const userUrl = settings.gatewayUrl?.trim() || '';
+    const userToken = settings.gatewayToken?.trim() || '';
+
     try {
       if (window.aegis?.config) {
         const config = await window.aegis.config.get();
-        const wsUrl = config.gatewayUrl || config.gatewayWsUrl || 'ws://127.0.0.1:18789';
-        const token = config.gatewayToken || '';
+        const configUrl = config.gatewayUrl || config.gatewayWsUrl || DEFAULT_URL;
+        const configToken = config.gatewayToken || '';
+
+        // User settings override ONLY if non-empty (otherwise use config as before)
+        const wsUrl = userUrl || configUrl;
+        const token = userToken || configToken;
+
         // Store HTTP URL for pairing flow + media resolution
         const httpUrl = wsUrl.replace(/^ws:/, 'http:').replace(/^wss:/, 'https:');
         setGatewayHttpUrl(httpUrl);
@@ -246,10 +249,10 @@ export default function App() {
         }
         gateway.connect(wsUrl, token);
       } else {
-        gateway.connect('ws://127.0.0.1:18789', '');
+        gateway.connect(userUrl || DEFAULT_URL, userToken || '');
       }
     } catch {
-      gateway.connect('ws://127.0.0.1:18789', '');
+      gateway.connect(userUrl || DEFAULT_URL, userToken || '');
     }
   };
 
@@ -280,6 +283,8 @@ export default function App() {
     console.log('[App] Pairing cancelled by user');
     setNeedsPairing(false);
     pairingTriggeredRef.current = false;
+    // Stop gateway pairing retry loop — user chose to dismiss
+    gateway.stopPairingRetry();
   }, []);
 
   return (
@@ -304,6 +309,8 @@ export default function App() {
             <Route path="/analytics" element={<FullAnalyticsPage />} />
             <Route path="/cron" element={<CronMonitorPage />} />
             <Route path="/agents" element={<AgentHubPage />} />
+            <Route path="/skills" element={<SkillsPageFull />} />
+            <Route path="/terminal" element={<TerminalPage />} />
             <Route path="/memory" element={<MemoryExplorerPage />} />
             <Route path="/settings" element={<SettingsPageFull />} />
           </Route>

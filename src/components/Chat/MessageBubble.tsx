@@ -128,6 +128,13 @@ interface MessageBubbleProps {
 
 // ── Shared Markdown Components ──
 const markdownComponents = {
+  table({ children }: any) {
+    return (
+      <div className="table-wrapper">
+        <table>{children}</table>
+      </div>
+    );
+  },
   code({ className, children, ...props }: any) {
     const match = /language-(\w+)/.exec(className || '');
     const codeString = String(children).replace(/\n$/, '');

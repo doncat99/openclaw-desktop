@@ -22,7 +22,21 @@
     "cron": "Cron Jobs",
     "agents": "Agents",
     "memory": "Memory",
-    "settings": "Settings"
+    "skills": "Skills",
+    "settings": "Settings",
+    "terminal": "Terminal"
+  },
+  "skills": {
+    "title": "Skills",
+    "mySkills": "My Skills",
+    "clawHub": "ClawHub",
+    "searchPlaceholder": "Search skills...",
+    "mostDownloaded": "Most Downloaded",
+    "mostStars": "Most Stars",
+    "trending": "Trending",
+    "noSkills": "No skills installed",
+    "noSkillsHint": "Install skills from ClawHub to extend your agent's capabilities",
+    "noResults": "No skills found"
   },
   "dashboard": {
     "title": "Mission Control",
@@ -272,5 +286,16 @@
     "toggleLanguage": "Switch to Arabic",
     "toggleNotifications": "Toggle Notifications",
     "searchPlaceholder": "Search commands..."
+  },
+  "terminal": {
+    "title": "Terminal",
+    "notAvailable": "Terminal is only available in the desktop app. The integrated terminal requires Electron and node-pty.",
+    "empty": "No terminal tabs open",
+    "newTab": "New Terminal"
+  },
+  "offline": {
+    "title": "Not Connected",
+    "description": "Unable to connect to OpenClaw Gateway. The app will reconnect automatically when the gateway becomes available.",
+    "retrying": "Attempting to reconnect..."
   }
 }

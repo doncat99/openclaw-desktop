@@ -8,7 +8,8 @@ import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import {
   LayoutDashboard, MessageCircle, Kanban, DollarSign,
-  Clock, Bot, Settings, Brain, Activity, User,
+  Clock, Bot, Settings, Brain, Activity, User, Puzzle,
+  Terminal,
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getDirection } from '@/i18n';
@@ -28,6 +29,8 @@ const navItems: NavItem[] = [
   { to: '/cron', icon: Clock, labelKey: 'nav.cron' },
   { to: '/agents', icon: Bot, labelKey: 'nav.agents' },
   { to: '/costs', icon: DollarSign, labelKey: 'nav.costs' },
+  { to: '/skills', icon: Puzzle, labelKey: 'nav.skills' },
+  { to: '/terminal', icon: Terminal, labelKey: 'nav.terminal' },
   { to: '/memory', icon: Brain, labelKey: 'nav.memory', badge: '🧪' },
   { to: '/settings', icon: Settings, labelKey: 'nav.settings' },
 ];

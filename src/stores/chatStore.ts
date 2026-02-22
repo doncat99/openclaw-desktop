@@ -25,6 +25,8 @@ export interface ChatMessage {
   toolOutput?: string;
   toolStatus?: 'running' | 'done' | 'error';
   toolDurationMs?: number;
+  // Thinking/reasoning content (saved after streaming completes)
+  thinkingContent?: string;
 }
 
 export interface Session {
@@ -109,6 +111,12 @@ interface ChatState {
   quickReplies: Array<{ text: string; value: string }>;
   setQuickReplies: (buttons: Array<{ text: string; value: string }>) => void;
 
+  // Thinking stream (live reasoning display)
+  thinkingText: string;
+  thinkingRunId: string | null;
+  setThinkingStream: (runId: string, text: string) => void;
+  clearThinking: () => void;
+
   // Connection
   connected: boolean;
   connecting: boolean;
@@ -174,15 +182,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const existingIdx = state.messages.findIndex((m) => m.id === id);
       if (existingIdx >= 0) {
         const updated = [...state.messages];
+
+        // Attach thinking content if available (from stream:"thinking" events
+        // OR from separate Reasoning: messages intercepted in gateway.ts)
+        const thinkingContent = state.thinkingText || undefined;
+
         updated[existingIdx] = {
           ...updated[existingIdx],
           content: content || updated[existingIdx].content,
           isStreaming: false,
           ...(extra?.mediaUrl ? { mediaUrl: extra.mediaUrl, mediaType: extra.mediaType } : {}),
+          ...(thinkingContent ? { thinkingContent } : {}),
         };
+
+        // OS notification handled in App.tsx onStreamEnd callback (single source)
+
         return {
           messages: updated,
           isTyping: false,
+          // Clear thinking state after attaching to message
+          thinkingText: '',
+          thinkingRunId: null,
           messagesPerSession: {
             ...state.messagesPerSession,
             [state.activeSessionKey]: updated,
@@ -303,6 +323,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // ── Quick Replies ──
   quickReplies: [],
   setQuickReplies: (buttons) => set({ quickReplies: buttons }),
+
+  // ── Thinking Stream ──
+  thinkingText: '',
+  thinkingRunId: null,
+  setThinkingStream: (runId, text) => set({ thinkingRunId: runId, thinkingText: text }),
+  clearThinking: () => set({ thinkingText: '', thinkingRunId: null }),
 
   // ── Connection ──
   connected: false,

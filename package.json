@@ -1,6 +1,6 @@
 {
   "name": "aegis-desktop",
-  "version": "5.2.1",
+  "version": "5.3.0",
   "description": "AEGIS Desktop — Advanced Chat Client for OpenClaw Gateway",
   "main": "dist-electron/main.js",
   "author": "Rashed",
@@ -17,7 +17,6 @@
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",
-    "@rollup/rollup-linux-x64-gnu": "^4.57.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "framer-motion": "^11.15.0",
@@ -33,7 +32,11 @@
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.0",
     "ws": "^8.18.0",
-    "zustand": "^5.0.0"
+    "zustand": "^5.0.0",
+    "@xterm/xterm": "^5.5.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-web-links": "^0.11.0",
+    "node-pty": "^1.0.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.18",
@@ -56,6 +59,9 @@
     "productName": "AEGIS Desktop",
     "copyright": "Copyright © 2026 Rashed",
     "asar": true,
+    "asarUnpack": [
+      "node_modules/node-pty/**/*"
+    ],
     "compression": "maximum",
     "win": {
       "target": [

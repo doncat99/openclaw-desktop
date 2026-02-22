@@ -22,6 +22,8 @@ interface SettingsState {
   memoryLocalPath: string;
   context1mEnabled: boolean;
   toolIntentEnabled: boolean;
+  gatewayUrl: string;
+  gatewayToken: string;
 
   setTheme: (theme: 'dark' | 'light' | 'system') => void;
   setFontSize: (size: number) => void;
@@ -41,6 +43,8 @@ interface SettingsState {
   setMemoryLocalPath: (path: string) => void;
   setContext1mEnabled: (enabled: boolean) => void;
   setToolIntentEnabled: (enabled: boolean) => void;
+  setGatewayUrl: (url: string) => void;
+  setGatewayToken: (token: string) => void;
 }
 
 // Auto-detect language on first run: check saved → system language → fallback to English
@@ -71,6 +75,8 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   memoryLocalPath: localStorage.getItem('aegis-memory-local-path') || '',
   context1mEnabled: localStorage.getItem('aegis-context1m') === 'true',
   toolIntentEnabled: localStorage.getItem('aegis-tool-intent') === 'true',
+  gatewayUrl: localStorage.getItem('aegis-gateway-url') || '',
+  gatewayToken: localStorage.getItem('aegis-gateway-token') || '',
 
   setTheme: (theme) => { localStorage.setItem('aegis-theme', theme); set({ theme }); },
   setFontSize: (size) => set({ fontSize: size }),
@@ -90,4 +96,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setMemoryLocalPath: (path) => { localStorage.setItem('aegis-memory-local-path', path); set({ memoryLocalPath: path }); },
   setContext1mEnabled: (enabled) => { localStorage.setItem('aegis-context1m', String(enabled)); set({ context1mEnabled: enabled }); },
   setToolIntentEnabled: (enabled) => { localStorage.setItem('aegis-tool-intent', String(enabled)); set({ toolIntentEnabled: enabled }); },
+  setGatewayUrl: (url) => { localStorage.setItem('aegis-gateway-url', url); set({ gatewayUrl: url }); },
+  setGatewayToken: (token) => { localStorage.setItem('aegis-gateway-token', token); set({ gatewayToken: token }); },
 }));

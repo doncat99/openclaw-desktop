@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AEGIS Desktop — Skills</title>
+<style>
+/* ═══════════════════════════════════════════════════════════
+   AEGIS Theme
+   ═══════════════════════════════════════════════════════════ */
+:root {
+  --bg:#0c1015; --surface:#111921; --elevated:#161f2b;
+  --card:rgba(255,255,255,0.025); --card-s:#131a24;
+  --chrome:rgba(255,255,255,0.025);
+  --border:rgba(255,255,255,0.05); --border-h:rgba(255,255,255,0.10);
+  --text:230 237 243; --text-2:177 186 196; --text-m:139 148 158; --text-d:90 99 112;
+  --pri:78 201 176; --pri-h:61 184 159; --pri-glow:rgba(78,201,176,0.14); --pri-s:rgba(78,201,176,0.07);
+  --acc:108 159 255; --acc-glow:rgba(108,159,255,0.12);
+  --danger:244 112 103; --warn:232 184 78; --success:63 185 80; --success-s:rgba(63,185,80,0.08);
+  --glass:rgba(255,255,255,0.025); --glass-h:rgba(255,255,255,0.05);
+  --overlay:255 255 255;
+  --scroll:rgba(255,255,255,0.07); --scroll-h:rgba(255,255,255,0.14);
+  --code:#0d1117;
+}
+:root.light {
+  --bg:#edeef2; --surface:#f5f6f8; --elevated:#e9eaee;
+  --card:rgba(0,0,0,0.012); --card-s:#ffffff;
+  --chrome:rgba(0,0,0,0.02);
+  --border:rgba(0,0,0,0.08); --border-h:rgba(0,0,0,0.13);
+  --text:20 20 25; --text-2:50 50 60; --text-m:80 82 95; --text-d:130 132 145;
+  --pri:5 128 100; --pri-h:3 108 84; --pri-glow:rgba(5,128,100,0.10); --pri-s:rgba(5,128,100,0.05);
+  --acc:40 82 185; --acc-glow:rgba(40,82,185,0.08);
+  --danger:200 30 30; --warn:170 115 0; --success:16 140 60; --success-s:rgba(16,140,60,0.06);
+  --glass:rgba(255,255,255,0.65); --glass-h:rgba(255,255,255,0.85);
+  --overlay:0 0 0;
+  --scroll:rgba(0,0,0,0.10); --scroll-h:rgba(0,0,0,0.18);
+  --code:#e4e6ec;
+}
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:rgb(var(--text));line-height:1.5;overflow:hidden;height:100vh}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:10px}
+::-webkit-scrollbar-thumb:hover{background:var(--scroll-h)}
+::selection{background:rgba(78,201,176,0.28)}
+
+/* ═══ Shell ═══ */
+.shell{display:flex;flex-direction:column;height:100vh}
+.titlebar{height:36px;display:flex;align-items:center;padding:0 14px;background:var(--chrome);border-bottom:1px solid var(--border);flex-shrink:0;gap:10px}
+.dots{display:flex;gap:6px}
+.dot{width:11px;height:11px;border-radius:50%}
+.d-r{background:rgb(var(--danger))}.d-y{background:rgb(var(--warn))}.d-g{background:rgb(var(--success))}
+.brand{font-weight:700;letter-spacing:0.06em;font-size:10.5px;background:linear-gradient(135deg,rgb(var(--pri)),rgb(var(--acc)));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.pill{padding:2px 8px;border-radius:5px;background:var(--pri-s);color:rgb(var(--pri));font-weight:500;font-size:10px}
+.spacer{flex:1}
+.ver{color:rgb(var(--text-d));font-size:10px}
+.body-row{display:flex;flex:1;min-height:0}
+
+/* ═══ Sidebar ═══ */
+.sidebar{width:56px;flex-shrink:0;background:var(--chrome);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:2px}
+.si{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:15px;color:rgb(var(--text-d));cursor:pointer;border:none;background:none;position:relative}
+.si:hover{color:rgb(var(--text-m));background:rgb(var(--overlay)/0.03)}
+.si.on{color:rgb(var(--pri));background:var(--pri-s)}
+.si.on::before{content:'';position:absolute;left:-9px;top:50%;transform:translateY(-50%);width:3px;height:16px;border-radius:2px;background:rgb(var(--pri));box-shadow:0 0 8px rgba(78,201,176,0.35)}
+.flex1{flex:1}
+.avatar{width:30px;height:30px;border-radius:10px;background:linear-gradient(135deg,rgba(78,201,176,0.18),rgba(213,0,249,0.12));display:flex;align-items:center;justify-content:center;color:rgb(var(--pri));font-size:12px}
+
+/* ═══ Page ═══ */
+.page{flex:1;overflow-y:auto;overflow-x:hidden}
+.page-inner{max-width:900px;margin:0 auto;padding:32px 36px 60px;animation:fadeIn .3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+
+.page-head{display:flex;align-items:center;gap:10px;margin-bottom:24px}
+.page-head h1{font-size:21px;font-weight:700;letter-spacing:-0.02em}
+.page-head .icon{font-size:22px}
+.theme-btn{margin-left:auto;width:34px;height:34px;border-radius:10px;border:1px solid var(--border);background:var(--glass);color:rgb(var(--text-d));font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.theme-btn:hover{border-color:var(--border-h);color:rgb(var(--pri))}
+
+/* ═══ Tabs ═══ */
+.tabs{display:inline-flex;gap:2px;background:var(--glass);border:1px solid var(--border);border-radius:12px;padding:3px;margin-bottom:28px}
+.tab{padding:9px 20px;font-size:13px;font-weight:500;color:rgb(var(--text-m));cursor:pointer;border:none;background:none;border-radius:9px;display:flex;align-items:center;gap:7px}
+.tab:hover{color:rgb(var(--text-2))}
+.tab.on{color:rgb(var(--pri));background:var(--pri-s);font-weight:600}
+.cnt{font-size:10px;padding:1px 6px;border-radius:6px;background:rgb(var(--overlay)/0.04);color:rgb(var(--text-d))}
+.tab.on .cnt{background:var(--pri-glow);color:rgb(var(--pri))}
+
+.panel{display:none}.panel.on{display:block;animation:fadeIn .25s ease}
+
+/* ═══ My Skills ═══ */
+.my-list{display:flex;flex-direction:column;gap:6px}
+.my-item{display:flex;align-items:center;gap:14px;padding:13px 16px;background:var(--card);border:1px solid var(--border);border-radius:12px;transition:all 150ms}
+.my-item:hover{border-color:var(--border-h);background:var(--glass-h)}
+:root.light .my-item{background:rgba(255,255,255,0.7)}:root.light .my-item:hover{background:rgba(255,255,255,0.9)}
+.my-e{font-size:22px;width:38px;height:38px;display:flex;align-items:center;justify-content:center;background:rgb(var(--overlay)/0.025);border-radius:10px;flex-shrink:0}
+.my-info{flex:1;min-width:0}
+.my-n{font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px}
+.my-d{font-size:11.5px;color:rgb(var(--text-m));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.my-v{font-size:10px;color:rgb(var(--text-d));margin-top:2px}
+.tog-area{flex-shrink:0;display:flex;align-items:center;gap:10px}
+.sw{width:36px;height:20px;border-radius:10px;background:rgb(var(--overlay)/0.07);position:relative;cursor:pointer;border:none}
+.sw.on{background:rgb(var(--pri));box-shadow:0 0 10px rgba(78,201,176,0.35)}
+.sw::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;background:#fff;border-radius:50%;transition:transform 150ms}
+.sw.on::after{transform:translateX(16px)}
+.del{background:none;border:none;color:rgb(var(--text-d));cursor:pointer;font-size:12px;padding:4px;border-radius:6px;opacity:0;transition:opacity 150ms}
+.my-item:hover .del{opacity:1}.del:hover{color:rgb(var(--danger))}
+
+/* ═══ Badges ═══ */
+.b{display:inline-flex;align-items:center;gap:2px;padding:1.5px 6px;border-radius:5px;font-size:9px;font-weight:600}
+.b-bun{background:rgb(var(--overlay)/0.04);color:rgb(var(--text-d))}
+.b-ch{background:var(--pri-s);color:rgb(var(--pri))}
+.b-loc{background:var(--success-s);color:rgb(var(--success))}
+.b-off{background:var(--pri-s);color:rgb(var(--pri))}
+.b-feat{background:var(--acc-glow);color:rgb(var(--acc))}
+
+/* ═══ ClawHub — Search ═══ */
+.search{max-width:480px;margin:0 auto 20px;position:relative}
+.search input{width:100%;padding:11px 16px 11px 40px;border-radius:12px;border:1px solid var(--border);background:var(--glass);backdrop-filter:blur(16px);color:rgb(var(--text));font-size:13.5px;outline:none}
+.search input::placeholder{color:rgb(var(--text-d))}
+.search input:focus{border-color:rgb(var(--pri)/0.4);box-shadow:0 0 0 3px var(--pri-glow)}
+.search .s-i{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:rgb(var(--text-d));font-size:14px}
+
+/* ═══ Filter Bar ═══ */
+.filter-bar{display:flex;align-items:center;gap:8px;margin-bottom:20px;flex-wrap:wrap}
+
+.sort-select{
+  padding:6px 12px;border-radius:8px;font-size:11.5px;font-weight:500;
+  background:var(--glass);border:1px solid var(--border);color:rgb(var(--text-2));
+  cursor:pointer;outline:none;appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%238b949e' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 10px center;padding-right:28px;
+}
+.sort-select:focus{border-color:rgb(var(--pri)/0.4)}
+
+.divider-v{width:1px;height:20px;background:var(--border);flex-shrink:0}
+
+.chip{
+  padding:5px 12px;border-radius:16px;font-size:11px;font-weight:500;
+  color:rgb(var(--text-m));cursor:pointer;border:1px solid var(--border);
+  background:none;transition:all 150ms;white-space:nowrap;
+}
+.chip:hover{border-color:var(--border-h);color:rgb(var(--text-2));background:rgb(var(--overlay)/0.02)}
+.chip.on{border-color:rgb(var(--pri)/0.3);color:rgb(var(--pri));background:var(--pri-s)}
+
+/* ═══ Results List ═══ */
+.results{display:flex;flex-direction:column;gap:2px}
+
+.r-item{
+  display:flex;align-items:center;gap:14px;
+  padding:12px 16px;border-radius:10px;
+  cursor:pointer;transition:background 120ms;
+}
+.r-item:hover{background:rgb(var(--overlay)/0.025)}
+
+.r-e{font-size:20px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:rgb(var(--overlay)/0.025);border-radius:9px;flex-shrink:0}
+
+.r-info{flex:1;min-width:0}
+.r-top{display:flex;align-items:center;gap:6px;margin-bottom:1px;flex-wrap:wrap}
+.r-name{font-weight:600;font-size:13px;color:rgb(var(--text))}
+.r-by{font-size:10.5px;color:rgb(var(--text-d));display:flex;align-items:center;gap:3px}
+.r-by img{width:13px;height:13px;border-radius:50%}
+.r-desc{font-size:11.5px;color:rgb(var(--text-m));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.r-stats{flex-shrink:0;display:flex;gap:14px;font-size:11px;color:rgb(var(--text-d));align-items:center}
+.r-stat{display:flex;align-items:center;gap:3px;min-width:56px}
+.r-ver{font-size:10px;color:rgb(var(--text-d));font-family:'SF Mono',monospace}
+
+/* Separator between items — subtle */
+.r-item+.r-item{border-top:1px solid rgb(var(--overlay)/0.02)}
+
+/* ═══ Empty state ═══ */
+.empty{text-align:center;padding:48px 0;color:rgb(var(--text-d));font-size:13px}
+
+/* ═══ Detail Panel — Slide from right ═══ */
+.detail-bg{
+  position:fixed;inset:0;z-index:500;
+  background:rgba(0,0,0,0.4);
+  display:none;backdrop-filter:blur(3px);
+}
+:root.light .detail-bg{background:rgba(0,0,0,0.2)}
+.detail-bg.open{display:block}
+
+.detail{
+  position:fixed;top:0;right:-480px;bottom:0;z-index:501;
+  width:480px;max-width:100%;
+  background:var(--surface);
+  border-left:1px solid var(--border);
+  box-shadow:-12px 0 40px rgba(0,0,0,0.3);
+  overflow-y:auto;
+  transition:right 250ms cubic-bezier(0.22,1,0.36,1);
+}
+:root.light .detail{background:#fff;box-shadow:-12px 0 40px rgba(0,0,0,0.08)}
+.detail.open{right:0}
+
+.d-x{
+  position:sticky;top:0;z-index:10;
+  display:flex;align-items:center;padding:12px 20px;
+  background:var(--surface);border-bottom:1px solid var(--border);
+}
+:root.light .d-x{background:#fff}
+.d-x-btn{
+  width:28px;height:28px;border-radius:8px;border:1px solid var(--border);
+  background:rgb(var(--overlay)/0.03);color:rgb(var(--text-m));font-size:14px;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+}
+.d-x-btn:hover{color:rgb(var(--danger));background:rgba(244,112,103,0.08)}
+.d-x-title{margin-left:12px;font-weight:600;font-size:14px;flex:1}
+
+.d-head{padding:24px 24px 16px}
+.d-top{display:flex;align-items:flex-start;gap:14px}
+.d-emoji{font-size:34px;width:52px;height:52px;display:flex;align-items:center;justify-content:center;background:rgb(var(--overlay)/0.025);border-radius:13px;flex-shrink:0}
+.d-tw{flex:1}
+.d-title{font-size:18px;font-weight:700;letter-spacing:-0.01em;display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:4px}
+.d-owner{font-size:11.5px;color:rgb(var(--text-m));display:flex;align-items:center;gap:5px;margin-bottom:8px}
+.d-owner img{width:16px;height:16px;border-radius:50%}
+.d-sum{font-size:12.5px;color:rgb(var(--text-2));line-height:1.6}
+
+.d-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin:0 24px;border-radius:10px;overflow:hidden;border:1px solid var(--border)}
+.d-stat{padding:10px;text-align:center;background:rgb(var(--overlay)/0.015)}
+.d-stat-n{font-size:16px;font-weight:700;color:rgb(var(--text))}
+.d-stat-l{font-size:9.5px;color:rgb(var(--text-d));text-transform:uppercase;letter-spacing:0.04em;margin-top:1px}
+
+.d-install{padding:16px 24px}
+.d-cmd{display:flex;align-items:center;background:var(--code);border:1px solid var(--border);border-radius:9px;padding:9px 12px;font-family:'JetBrains Mono','Fira Code',monospace;font-size:11.5px;color:rgb(var(--pri));gap:8px}
+.d-cmd code{flex:1}.d-cmd .cp{background:none;border:none;color:rgb(var(--text-d));cursor:pointer;font-size:12px}.d-cmd .cp:hover{color:rgb(var(--pri))}
+
+.d-actions{padding:0 24px 16px;display:flex;gap:8px}
+.btn{padding:8px 16px;border-radius:9px;font-size:12px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:5px;border:1px solid transparent}
+.btn-p{background:rgb(var(--pri));color:#fff;border:none;flex:1;justify-content:center}
+.btn-p:hover{box-shadow:0 0 14px rgba(78,201,176,0.3)}
+.btn-g{background:rgb(var(--overlay)/0.03);color:rgb(var(--text-2));border-color:var(--border)}
+.btn-g:hover{border-color:var(--border-h)}
+
+.d-sep{height:1px;background:var(--border);margin:0 24px}
+
+.d-body{padding:20px 24px}
+.d-body h3{font-size:12px;font-weight:600;margin-bottom:8px;color:rgb(var(--text-m));text-transform:uppercase;letter-spacing:0.04em;display:flex;align-items:center;gap:5px}
+
+.req-tags{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:16px}
+.req{padding:3px 9px;border-radius:6px;font-size:10.5px;font-family:'JetBrains Mono',monospace;background:var(--pri-s);border:1px solid rgb(var(--pri)/0.12);color:rgb(var(--pri))}
+
+.readme{background:var(--code);border:1px solid var(--border);border-radius:10px;padding:16px;font-size:12.5px;line-height:1.65;color:rgb(var(--text-2));max-height:280px;overflow-y:auto}
+.readme h1,.readme h2,.readme h3{color:rgb(var(--text));margin:10px 0 5px;font-weight:600}
+.readme h1{font-size:15px}.readme h2{font-size:13px}
+.readme p{margin-bottom:6px}
+.readme code{background:var(--pri-s);border:1px solid rgb(var(--pri)/0.12);padding:1px 5px;border-radius:4px;font-size:11px;font-family:'JetBrains Mono',monospace;color:rgb(var(--pri))}
+.readme pre{background:rgb(var(--overlay)/0.025);padding:10px;border-radius:8px;overflow-x:auto;margin:6px 0}
+.readme pre code{background:none;border:none;padding:0;color:rgb(var(--text-2))}
+.readme ul{padding-left:16px;margin-bottom:6px}.readme li{margin-bottom:2px}.readme li::marker{color:rgb(var(--pri))}.readme strong{color:rgb(var(--text))}
+
+.ver-list{list-style:none}
+.ver-item{padding:7px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:7px;font-size:11.5px}
+.ver-item:last-child{border-bottom:none}
+.ver-b{padding:2px 7px;border-radius:5px;font-size:10px;font-weight:600;font-family:monospace;background:var(--pri-s);color:rgb(var(--pri))}
+.ver-t{padding:1px 5px;border-radius:4px;font-size:9px;font-weight:600;background:rgb(var(--success));color:#fff}
+.ver-d{color:rgb(var(--text-d));font-size:10px;margin-left:auto}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div style="position:fixed;top:-200px;right:-200px;width:600px;height:600px;background:radial-gradient(circle,rgba(78,201,176,0.035) 0%,transparent 70%);pointer-events:none;z-index:0"></div>
+  <div style="position:fixed;bottom:-300px;left:-100px;width:500px;height:500px;background:radial-gradient(circle,rgba(213,0,249,0.025) 0%,transparent 70%);pointer-events:none;z-index:0"></div>
+
+  <div class="titlebar">
+    <div class="dots"><div class="dot d-r"></div><div class="dot d-y"></div><div class="dot d-g"></div></div>
+    <div class="brand">AEGIS DESKTOP</div><div class="pill">Opus 4.6</div><div class="spacer"></div><span class="ver">v5.3.0</span>
+  </div>
+
+  <div class="body-row">
+    <nav class="sidebar">
+      <button class="si">📊</button><button class="si">💬</button><button class="si">📋</button>
+      <button class="si">⏰</button><button class="si">🤖</button><button class="si">💰</button>
+      <button class="si on">🧩</button><button class="si">⚙️</button>
+      <div class="flex1"></div><div class="avatar">👤</div>
+    </nav>
+
+    <div class="page">
+      <div class="page-inner">
+        <div class="page-head">
+          <span class="icon">🧩</span><h1>Skills</h1>
+          <button class="theme-btn" onclick="toggleTheme()" id="tb">🌙</button>
+        </div>
+
+        <div class="tabs">
+          <button class="tab on" data-t="my" onclick="sw('my')">📦 My Skills <span class="cnt">7</span></button>
+          <button class="tab" data-t="hub" onclick="sw('hub')">🌐 ClawHub <span class="cnt">3,286</span></button>
+        </div>
+
+        <div class="panel on" id="p-my"><div class="my-list" id="myList"></div></div>
+
+        <div class="panel" id="p-hub">
+          <div class="search"><span class="s-i">🔍</span><input placeholder="Search skills..." id="searchInput" oninput="filterSkills()" /></div>
+          <div class="filter-bar">
+            <select class="sort-select" id="sortSelect" onchange="sortSkills()">
+              <option value="trending">🔥 Trending</option>
+              <option value="downloads">⬇️ Most Downloaded</option>
+              <option value="stars">⭐ Most Stars</option>
+              <option value="newest">🆕 Newest</option>
+            </select>
+            <div class="divider-v"></div>
+            <button class="chip on" data-cat="all" onclick="pickCat(this)">All</button>
+            <button class="chip" data-cat="ai" onclick="pickCat(this)">🤖 AI</button>
+            <button class="chip" data-cat="dev" onclick="pickCat(this)">💻 Dev</button>
+            <button class="chip" data-cat="prod" onclick="pickCat(this)">📊 Productivity</button>
+            <button class="chip" data-cat="comm" onclick="pickCat(this)">💬 Communication</button>
+            <button class="chip" data-cat="search" onclick="pickCat(this)">🔍 Research</button>
+            <button class="chip" data-cat="home" onclick="pickCat(this)">🏠 Smart Home</button>
+            <button class="chip" data-cat="write" onclick="pickCat(this)">✍️ Writing</button>
+            <button class="chip" data-cat="devops" onclick="pickCat(this)">⚙️ DevOps</button>
+          </div>
+          <div class="results" id="resultsList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Detail slide panel -->
+<div class="detail-bg" id="dbg" onclick="cd()"></div>
+<div class="detail" id="dp"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════
+   Real Data — ClawHub API (2026-02-21)
+   ═══════════════════════════════════════════════════════════ */
+const MY=[
+  {s:'weather',n:'Weather',e:'🌤️',d:'Get current weather and forecasts (no API key required).',v:'1.0.0',on:1,t:'bundled'},
+  {s:'openai-image-gen',n:'OpenAI Image Gen',e:'🎨',d:'Generate images with DALL-E 3 and GPT-Image-1.',v:'1.0.0',on:0,t:'bundled'},
+  {s:'openai-whisper-api',n:'OpenAI Whisper',e:'🎙️',d:'Transcribe audio via OpenAI Transcriptions API.',v:'1.0.0',on:1,t:'bundled'},
+  {s:'nano-banana-pro',n:'Nano Banana Pro',e:'🍌',d:'Generate/edit images with Gemini 3 Pro Image.',v:'1.0.1',on:1,t:'local'},
+  {s:'skill-creator',n:'Skill Creator',e:'🛠️',d:'Guide for creating effective agent skills.',v:'1.0.0',on:1,t:'bundled'},
+  {s:'healthcheck',n:'Healthcheck',e:'🏥',d:'Host security hardening and risk-tolerance config.',v:'1.0.0',on:1,t:'bundled'},
+  {s:'gog',n:'Gog',e:'📧',d:'Google Workspace CLI — Gmail, Calendar, Drive, Sheets, Docs.',v:'1.0.0',on:1,t:'clawhub'},
+];
+
+const HUB=[
+  {s:'gog',n:'Gog',e:'📧',sum:'Google Workspace CLI for Gmail, Calendar, Drive, Contacts, Sheets, and Docs.',o:'steipete',av:'https://avatars.githubusercontent.com/u/58493?v=4',st:205,dl:30521,ins:477,v:'1.0.0',b:'off',cat:'prod',tr:95},
+  {s:'self-improving-agent',n:'Self-Improving Agent',e:'🧠',sum:'Captures learnings, errors, and corrections to enable continuous improvement.',o:'pskoett',av:'https://avatars.githubusercontent.com/u/177305814?v=4',st:265,dl:27598,ins:210,v:'1.0.5',b:'feat',cat:'ai',tr:92},
+  {s:'tavily-search',n:'Tavily Web Search',e:'🔎',sum:'AI-optimized web search via Tavily API. Concise, relevant results for AI agents.',o:'arun-8687',av:'https://avatars.githubusercontent.com/u/147966288?v=4',st:83,dl:24750,ins:154,v:'1.0.0',cat:'search',tr:88},
+  {s:'summarize',n:'Summarize',e:'📝',sum:'Summarize URLs or files — web pages, PDFs, images, audio, YouTube.',o:'steipete',av:'https://avatars.githubusercontent.com/u/58493?v=4',st:94,dl:23364,ins:451,v:'1.0.0',b:'off',cat:'prod',tr:87},
+  {s:'agent-browser',n:'Agent Browser',e:'🌐',sum:'Fast Rust-based headless browser automation CLI with Node.js fallback.',o:'TheSethRose',av:'https://avatars.githubusercontent.com/u/10383809?v=4',st:112,dl:23329,ins:198,v:'0.2.0',b:'feat',cat:'dev',tr:86},
+  {s:'find-skills',n:'Find Skills',e:'🔍',sum:'Discover and install agent skills when users ask about capabilities.',o:'steipete',av:'https://avatars.githubusercontent.com/u/58493?v=4',st:71,dl:22967,ins:0,v:'0.1.0',cat:'ai',tr:85},
+  {s:'github',n:'Github',e:'🐙',sum:'Interact with GitHub using the gh CLI for issues, PRs, CI runs.',o:'steipete',av:'https://avatars.githubusercontent.com/u/58493?v=4',st:63,dl:22409,ins:387,v:'1.0.0',b:'off',cat:'dev',tr:84},
+  {s:'ontology',n:'Ontology',e:'🗂️',sum:'Structured knowledge and reasoning ontology for agents.',o:'steipete',av:'https://avatars.githubusercontent.com/u/58493?v=4',st:34,dl:21642,ins:0,v:'0.1.2',cat:'ai',tr:82},
+  {s:'weather',n:'Weather',e:'🌤️',sum:'Get current weather and forecasts. No API key required.',o:'steipete',av:'https://avatars.githubusercontent.com/u/58493?v=4',st:49,dl:19222,ins:327,v:'1.0.0',b:'off',cat:'prod',tr:80},
+  {s:'sonoscli',n:'Sonoscli',e:'🔊',sum:'Control Sonos speakers — discover, status, play, volume, group.',o:'steipete',av:'https://avatars.githubusercontent.com/u/58493?v=4',st:14,dl:19023,ins:0,v:'1.0.0',cat:'home',tr:90},
+  {s:'proactive-agent',n:'Proactive Agent',e:'🦞',sum:'Transform agents from task-followers into proactive partners.',o:'halthelobster',av:'https://avatars.githubusercontent.com/u/257232409?v=4',st:114,dl:17604,ins:114,v:'3.1.0',b:'feat',cat:'ai',tr:78},
+  {s:'nano-banana-pro',n:'Nano Banana Pro',e:'🍌',sum:'Generate/edit images with Gemini 3 Pro Image. Text-to-image + image editing.',o:'steipete',av:'https://avatars.githubusercontent.com/u/58493?v=4',st:46,dl:12034,ins:257,v:'1.0.1',cat:'ai',tr:76},
+  {s:'notion',n:'Notion',e:'📓',sum:'Notion API for creating and managing pages, databases, and blocks.',o:'steipete',av:'https://avatars.githubusercontent.com/u/58493?v=4',st:43,dl:12371,ins:265,v:'1.0.0',b:'off',cat:'prod',tr:75},
+  {s:'humanizer',n:'Humanizer',e:'✍️',sum:'Remove signs of AI-generated writing from text.',o:'biostartechnology',av:'https://avatars.githubusercontent.com/u/46933184?v=4',st:81,dl:10466,ins:77,v:'1.0.0',cat:'write',tr:74},
+  {s:'obsidian',n:'Obsidian',e:'💎',sum:'Work with Obsidian vaults — plain Markdown notes and automation.',o:'steipete',av:'https://avatars.githubusercontent.com/u/58493?v=4',st:36,dl:11265,ins:0,v:'1.0.0',cat:'prod',tr:73},
+  {s:'openai-whisper',n:'OpenAI Whisper',e:'🎙️',sum:'Local speech-to-text with the Whisper CLI. No API key required.',o:'steipete',av:'https://avatars.githubusercontent.com/u/58493?v=4',st:45,dl:10300,ins:0,v:'1.0.0',cat:'ai',tr:72},
+  {s:'auto-updater',n:'Auto-Updater',e:'🔄',sum:'Automatically update Clawdbot and all installed skills once daily.',o:'steipete',av:'https://avatars.githubusercontent.com/u/58493?v=4',st:59,dl:10155,ins:0,v:'1.0.0',cat:'devops',tr:71},
+  {s:'caldav-calendar',n:'CalDAV Calendar',e:'📅',sum:'Sync and query CalDAV calendars — iCloud, Google, Fastmail, Nextcloud.',o:'steipete',av:'https://avatars.githubusercontent.com/u/58493?v=4',st:69,dl:7318,ins:0,v:'1.0.0',cat:'prod',tr:70},
+];
+
+const DET={
+  gog:{s:'gog',n:'Gog',e:'📧',sum:'Google Workspace CLI for Gmail, Calendar, Drive, Contacts, Sheets, and Docs.',o:'steipete',on:'Peter Steinberger',av:'https://avatars.githubusercontent.com/u/58493?v=4',st:205,dl:30521,ins:477,cm:14,vs:1,v:'1.0.0',b:'off',req:{env:['GOOGLE_CLIENT_ID','GOOGLE_CLIENT_SECRET'],bin:['gog']},
+    rm:`<h1>Gog — Google Workspace CLI</h1><p>A fast CLI for Google Workspace. Manage Gmail, Calendar, Drive, Contacts, Sheets, and Docs from your agent.</p><h2>Features</h2><ul><li><strong>Gmail:</strong> Read, search, send, reply, label, archive</li><li><strong>Calendar:</strong> List, create, update, delete events</li><li><strong>Drive:</strong> Upload, download, share, search files</li><li><strong>Contacts:</strong> Search, create, manage groups</li><li><strong>Sheets:</strong> Read, write, batch operations</li></ul><h2>Usage</h2><pre><code>gog gmail list --limit 10\ngog calendar create "Meeting" --start "2026-02-22 10:00"\ngog drive upload ./report.pdf</code></pre>`,
+    vh:[{v:'1.0.0',t:'latest',d:'2025-06-04',c:'Initial release.'}]},
+  'self-improving-agent':{s:'self-improving-agent',n:'Self-Improving Agent',e:'🧠',sum:'Captures learnings, errors, and corrections to enable continuous improvement.',o:'pskoett',on:'pskoett',av:'https://avatars.githubusercontent.com/u/177305814?v=4',st:265,dl:27598,ins:210,cm:14,vs:6,v:'1.0.5',b:'feat',req:{env:[],bin:[]},
+    rm:`<h1>Self-Improving Agent</h1><p>Captures learnings from errors, corrections, and discoveries. Builds a persistent knowledge base across sessions.</p><h2>How it works</h2><ul><li>Command fails → records the fix</li><li>User corrects agent → stores correction</li><li>Before major tasks → reviews learnings</li></ul>`,
+    vh:[{v:'1.0.5',t:'latest',d:'2026-02-15',c:'Improved correction detection.'},{v:'1.0.0',t:null,d:'2025-08-12',c:'Initial release.'}]},
+};
+
+/* ═══════════════════════════════════════════════════════════ */
+let currentCat='all', currentSort='trending', currentSearch='';
+
+function f(n){return n>=1000?(n/1000).toFixed(1).replace(/\.0$/,'')+'k':n+''}
+function tb(t){return t==='clawhub'?'<span class="b b-ch">ClawHub</span>':t==='local'?'<span class="b b-loc">Local</span>':'<span class="b b-bun">Bundled</span>'}
+function bb(b){return b==='off'?'<span class="b b-off">✓ Official</span>':b==='feat'?'<span class="b b-feat">⭐ Featured</span>':''}
+
+function renderMy(){
+  document.getElementById('myList').innerHTML=MY.map(s=>`
+    <div class="my-item">
+      <div class="my-e">${s.e}</div>
+      <div class="my-info">
+        <div class="my-n">${s.n} ${tb(s.t)}</div>
+        <div class="my-d">${s.d}</div>
+        <div class="my-v">v${s.v} · ${s.s}</div>
+      </div>
+      <div class="tog-area">
+        <button class="sw ${s.on?'on':''}" onclick="this.classList.toggle('on')"></button>
+        <button class="del">🗑️</button>
+      </div>
+    </div>`).join('');
+}
+
+function getFiltered(){
+  let items=[...HUB];
+  if(currentCat!=='all') items=items.filter(s=>s.cat===currentCat);
+  if(currentSearch){const q=currentSearch.toLowerCase();items=items.filter(s=>(s.n+s.sum+s.o+s.s).toLowerCase().includes(q))}
+  const sorts={trending:(a,b)=>b.tr-a.tr,downloads:(a,b)=>b.dl-a.dl,stars:(a,b)=>b.st-a.st,newest:(a,b)=>b.tr-a.tr};
+  items.sort(sorts[currentSort]||sorts.trending);
+  return items;
+}
+
+function renderHub(){
+  const items=getFiltered();
+  if(!items.length){document.getElementById('resultsList').innerHTML='<div class="empty">No skills found</div>';return}
+  document.getElementById('resultsList').innerHTML=items.map(s=>`
+    <div class="r-item" onclick="od('${s.s}')">
+      <div class="r-e">${s.e}</div>
+      <div class="r-info">
+        <div class="r-top">
+          <span class="r-name">${s.n}</span>
+          ${bb(s.b)}
+          <span class="r-by"><img src="${s.av}" loading="lazy"/>${s.o}</span>
+        </div>
+        <div class="r-desc">${s.sum}</div>
+      </div>
+      <div class="r-stats">
+        <span class="r-stat">⬇️ ${f(s.dl)}</span>
+        <span class="r-stat">⭐ ${s.st}</span>
+        <span class="r-ver">v${s.v}</span>
+      </div>
+    </div>`).join('');
+}
+
+function pickCat(el){
+  document.querySelectorAll('.chip').forEach(c=>c.classList.remove('on'));
+  el.classList.add('on');
+  currentCat=el.dataset.cat;
+  renderHub();
+}
+function sortSkills(){currentSort=document.getElementById('sortSelect').value;renderHub()}
+function filterSkills(){currentSearch=document.getElementById('searchInput').value;renderHub()}
+
+/* ═══ Detail Panel ═══ */
+function od(slug){
+  const d=DET[slug];
+  const s=d||HUB.find(x=>x.s===slug);
+  if(!s)return;
+
+  document.getElementById('dp').innerHTML=`
+    <div class="d-x"><button class="d-x-btn" onclick="cd()">✕</button><span class="d-x-title">${s.n||s.name}</span></div>
+    <div class="d-head"><div class="d-top">
+      <div class="d-emoji">${s.e}</div>
+      <div class="d-tw">
+        <div class="d-title">${s.n} ${bb(s.b)}</div>
+        <div class="d-owner"><img src="${s.av||d?.av}" loading="lazy"/>${d?.on||s.o} <span style="color:rgb(var(--text-d))">@${s.o}</span></div>
+        <div class="d-sum">${s.sum}</div>
+      </div>
+    </div></div>
+    <div class="d-stats">
+      <div class="d-stat"><div class="d-stat-n">${f(s.dl)}</div><div class="d-stat-l">Downloads</div></div>
+      <div class="d-stat"><div class="d-stat-n">${s.st}</div><div class="d-stat-l">Stars</div></div>
+      <div class="d-stat"><div class="d-stat-n">${f(s.ins||0)}</div><div class="d-stat-l">Installs</div></div>
+    </div>
+    <div class="d-install"><div class="d-cmd"><code>clawhub install ${s.s}</code><button class="cp" onclick="navigator.clipboard.writeText('clawhub install ${s.s}')">📋</button></div></div>
+    <div class="d-actions">
+      <button class="btn btn-p">📥 Install</button>
+      <button class="btn btn-g">⭐ Star</button>
+      <button class="btn btn-g">🔗 ClawHub</button>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-body">
+      ${d&&d.req&&(d.req.env.length||d.req.bin.length)?`<h3>🔧 Requirements</h3><div class="req-tags">${d.req.env.map(e=>`<span class="req">🔑 ${e}</span>`).join('')}${d.req.bin.map(b=>`<span class="req">⚙️ ${b}</span>`).join('')}</div>`:''}
+      ${d?`<h3>📖 Readme</h3><div class="readme">${d.rm}</div>
+        <h3 style="margin-top:16px">📋 Versions</h3>
+        <ul class="ver-list">${d.vh.map(v=>`<li class="ver-item"><span class="ver-b">v${v.v}</span>${v.t?`<span class="ver-t">${v.t}</span>`:''}<span style="color:rgb(var(--text-2));font-size:11px">${v.c}</span><span class="ver-d">${v.d}</span></li>`).join('')}</ul>`
+      :`<p style="color:rgb(var(--text-d));text-align:center;padding:24px 0;font-size:12px">Loading from ClawHub...</p>`}
+    </div>`;
+
+  document.getElementById('dbg').classList.add('open');
+  document.getElementById('dp').classList.add('open');
+}
+
+function cd(){document.getElementById('dbg').classList.remove('open');document.getElementById('dp').classList.remove('open')}
+function sw(t){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x.dataset.t===t));document.querySelectorAll('.panel').forEach(x=>x.classList.toggle('on',x.id===`p-${t}`))}
+function toggleTheme(){const l=document.documentElement.classList.toggle('light');document.getElementById('tb').textContent=l?'☀️':'🌙'}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')cd()});
+
+renderMy();renderHub();
+</script>
+</body>
+</html>

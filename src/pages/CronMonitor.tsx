@@ -3,8 +3,7 @@
 // Top: Command bar | Col 1: Gantt job rows | Col 2: 24h clock | Col 3: Detail + Activity
 // ═══════════════════════════════════════════════════════════
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
-// Note: useCallback still needed for loadAllRuns/loadSelectedRuns
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Play, RotateCcw, Loader2, Check, X, Plus, Search } from 'lucide-react';
 import { gateway } from '@/services/gateway';
@@ -79,27 +78,28 @@ const getStatus = (job: CronJob): 'active' | 'error' | 'paused' => {
 
 // ── Templates ──
 
+// Fix #8: colorIdx instead of dataColor() at module load (CSS vars may not be ready)
 const CRON_TEMPLATES = [
   {
-    id: 'morning-briefing', icon: '⚡', color: dataColor(2),
+    id: 'morning-briefing', icon: '⚡', colorIdx: 2,
     name: { en: 'Morning Briefing', ar: 'إحاطة الصباح' },
     desc: { en: 'Weather, news, and memory review every morning', ar: 'طقس، أخبار، ومراجعة الذاكرة كل صباح' },
     job: { name: 'Morning Briefing', schedule: { kind: 'cron', expr: '0 6 * * *', tz: 'UTC' }, payload: { kind: 'agentTurn', message: 'Good morning! Prepare a brief morning briefing: 1) Check the weather for my location, 2) Search for top news headlines today, 3) Check memory files for any upcoming tasks, reminders, or deadlines. Keep it concise and useful.' }, sessionTarget: 'isolated', enabled: true },
   },
   {
-    id: 'weekly-digest', icon: '📝', color: dataColor(1),
+    id: 'weekly-digest', icon: '📝', colorIdx: 1,
     name: { en: 'Weekly Digest', ar: 'ملخص أسبوعي' },
     desc: { en: 'End-of-week summary and memory cleanup', ar: 'ملخص نهاية الأسبوع وتنظيف الذاكرة' },
     job: { name: 'Weekly Digest', schedule: { kind: 'cron', expr: '0 20 * * 5', tz: 'UTC' }, payload: { kind: 'agentTurn', message: 'Weekly review time. 1) Read through this week\'s memory files, 2) Summarize key events and decisions, 3) Update MEMORY.md with important info, 4) Clean up outdated entries.' }, sessionTarget: 'isolated', enabled: true },
   },
   {
-    id: 'check-in', icon: '🧠', color: dataColor(3),
+    id: 'check-in', icon: '🧠', colorIdx: 3,
     name: { en: 'Check-In', ar: 'تواصل دوري' },
     desc: { en: 'Periodic nudge if anything needs attention', ar: 'يتواصل معك كل فترة إذا في شي مهم' },
     job: { name: 'Check-In', schedule: { kind: 'every', everyMs: 28800000 }, payload: { kind: 'agentTurn', message: 'Time for a check-in. Review recent memory files and sessions for context. If there are pending tasks or anything worth following up on, reach out. If nothing needs attention, skip silently.' }, sessionTarget: 'isolated', enabled: true },
   },
   {
-    id: 'system-health', icon: '🔍', color: dataColor(5),
+    id: 'system-health', icon: '🔍', colorIdx: 5,
     name: { en: 'System Health', ar: 'صحة النظام' },
     desc: { en: 'Disk, RAM, uptime, and process monitoring', ar: 'مساحة التخزين، الرام، وفحص العمليات' },
     job: { name: 'System Health Check', schedule: { kind: 'every', everyMs: 21600000 }, payload: { kind: 'agentTurn', message: 'Run a system health check: 1) Check disk space, 2) Check memory usage, 3) Check uptime, 4) Look for unusual processes. Report only if something needs attention.' }, sessionTarget: 'isolated', enabled: true },
@@ -363,6 +363,33 @@ export function CronMonitorPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showAllLogs, setShowAllLogs] = useState(false);
 
+  // Fix #1: Stable ref for jobs — avoids useCallback rebuilding every 30s
+  const jobsRef = useRef<CronJob[]>([]);
+  jobsRef.current = jobs;
+
+  // Fix #3: Stale request guard for selected job fetches
+  const selectedFetchId = useRef(0);
+
+  // Fix #6: Tick for live countdown/timeAgo updates (every 15s)
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setTick(t => (t + 1) % 10000), 15000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // Fix #11: Cache theme hex values (re-computed on mount only)
+  const tc = useMemo(() => ({
+    primary: themeHex('primary'),
+    accent: themeHex('accent'),
+    danger: themeHex('danger'),
+    warning: themeHex('warning'),
+    success: themeHex('success'),
+    dangerA70: themeAlpha('danger', 0.7),
+    dangerA40: themeAlpha('danger', 0.4),
+    dangerA25: themeAlpha('danger', 0.25),
+    primaryA50: themeAlpha('primary', 0.5),
+  }), []); // eslint-disable-line
+
   // ── Derived ──
   const colorMap = useMemo(() => {
     const m: Record<string, string> = {};
@@ -394,36 +421,91 @@ export function CronMonitorPage() {
 
   // Jobs come from central store (polled every 30s automatically)
 
-  // ── Load all recent runs for activity log ──
+  // ── Runs cache — only reload on manual Refresh or first mount ──
+  const runsCache = useRef<Record<string, RunEntry[]>>({});
+  const runsCacheLoaded = useRef(false);
+
+  // ── Load all recent runs — batched (3 at a time) to avoid gateway overload ──
+  // Fix #1: uses jobsRef instead of jobs dependency → no rebuild every 30s
   const loadAllRuns = useCallback(async () => {
-    if (!connected || jobs.length === 0) return;
+    const currentJobs = jobsRef.current;
+    if (!connected || currentJobs.length === 0) return;
     setLoadingRuns(true);
     try {
       const all: RunEntry[] = [];
-      await Promise.all(jobs.slice(0, 12).map(async (job) => {
-        try {
-          const result = await gateway.call('cron.runs', { jobId: job.id });
-          (result?.entries || []).slice(-5).forEach((e: any) =>
-            all.push({ ...e, jobId: job.id, jobName: job.name || job.id })
-          );
-        } catch { /* silent */ }
+      const jobList = currentJobs.slice(0, 12);
+      const BATCH_SIZE = 3;
+
+      for (let i = 0; i < jobList.length; i += BATCH_SIZE) {
+        const batch = jobList.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map(async (job) => {
+          try {
+            const result = await gateway.call('cron.runs', { jobId: job.id });
+            const entries = (result?.entries || []).slice(-5).map((e: any) => ({
+              ...e, jobId: job.id, jobName: job.name || job.id,
+            }));
+            runsCache.current[job.id] = entries;
+            all.push(...entries);
+          } catch { /* silent */ }
+        }));
+      }
+
+      all.sort((a, b) => new Date(b.ts || 0).getTime() - new Date(a.ts || 0).getTime());
+      setRecentRuns(all.slice(0, 30));
+      runsCacheLoaded.current = true;
+    } catch { /* silent */ }
+    finally { setLoadingRuns(false); }
+  }, [connected]);
+
+  // ── Load runs for a single job and merge into cache ──
+  // Fix #1: uses jobsRef → stable callback, no rebuild on poll
+  const loadSingleJobRuns = useCallback(async (jobId: string) => {
+    if (!connected) return;
+    try {
+      const job = jobsRef.current.find(j => j.id === jobId);
+      const result = await gateway.call('cron.runs', { jobId });
+      const entries = (result?.entries || []).slice(-5).map((e: any) => ({
+        ...e, jobId, jobName: job?.name || jobId,
       }));
+      runsCache.current[jobId] = entries;
+
+      // Rebuild recent runs from cache
+      const all: RunEntry[] = [];
+      Object.values(runsCache.current).forEach(arr => all.push(...arr));
       all.sort((a, b) => new Date(b.ts || 0).getTime() - new Date(a.ts || 0).getTime());
       setRecentRuns(all.slice(0, 30));
     } catch { /* silent */ }
-    finally { setLoadingRuns(false); }
-  }, [connected, jobs]);
+  }, [connected]);
 
-  useEffect(() => { if (jobs.length > 0) loadAllRuns(); }, [jobs.length]); // eslint-disable-line
+  // Load once on first mount only
+  useEffect(() => {
+    if (jobs.length > 0 && !runsCacheLoaded.current) loadAllRuns();
+  }, [jobs.length]); // eslint-disable-line
 
-  // ── Load selected job runs ──
+  // ── Load selected job runs (cache-first, then fetch) ──
+  // Fix #3: stale request guard — rapid clicks don't cause race conditions
   useEffect(() => {
     if (!selectedJobId || !connected) { setSelectedJobRuns([]); return; }
+
+    const fetchId = ++selectedFetchId.current;
+
+    // Show cached data immediately (if available)
+    const cached = runsCache.current[selectedJobId];
+    if (cached?.length) {
+      setSelectedJobRuns([...cached].slice(-14).reverse());
+    }
+
+    // Then fetch fresh data in background
     (async () => {
       try {
         const result = await gateway.call('cron.runs', { jobId: selectedJobId });
-        setSelectedJobRuns((result?.entries || []).slice(-14).reverse());
-      } catch { setSelectedJobRuns([]); }
+        if (fetchId !== selectedFetchId.current) return; // stale — discard
+        const entries = (result?.entries || []).slice(-14).reverse();
+        setSelectedJobRuns(entries);
+      } catch {
+        if (fetchId !== selectedFetchId.current) return; // stale
+        if (!cached?.length) setSelectedJobRuns([]);
+      }
     })();
   }, [selectedJobId, connected]);
 
@@ -440,7 +522,8 @@ export function CronMonitorPage() {
     try {
       await gateway.call('cron.run', { id: jobId }); await refreshGroup('cron');
       setRunResult(p => ({ ...p, [jobId]: 'ok' }));
-      setTimeout(loadAllRuns, 2000);
+      // Only refresh this single job's runs (not all 12)
+      setTimeout(() => loadSingleJobRuns(jobId), 2000);
     } catch { setRunResult(p => ({ ...p, [jobId]: 'error' })); }
     finally {
       setActionLoading(null);
@@ -460,8 +543,8 @@ export function CronMonitorPage() {
     }
   };
 
-  // Auto-select first job
-  useEffect(() => { if (jobs.length > 0 && !selectedJobId) setSelectedJobId(jobs[0].id); }, [jobs]); // eslint-disable-line
+  // Auto-select first job — Fix #10: deps = [jobs.length] not [jobs]
+  useEffect(() => { if (jobs.length > 0 && !selectedJobId) setSelectedJobId(jobs[0].id); }, [jobs.length]); // eslint-disable-line
 
   // ═══ RENDER ═══
   return (
@@ -488,7 +571,7 @@ export function CronMonitorPage() {
               outline-none focus:border-aegis-accent/30 focus:bg-aegis-accent/[0.03] transition-all"
           />
         </div>
-        <button onClick={() => refreshGroup('cron')}
+        <button onClick={() => { refreshGroup('cron'); loadAllRuns(); }}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] border border-[rgb(var(--aegis-overlay)/0.06)]
             text-[11px] font-semibold text-aegis-text-muted hover:text-aegis-text-secondary transition-colors">
           <RotateCcw size={12} className={loading ? 'animate-spin' : ''} /> Refresh
@@ -502,7 +585,8 @@ export function CronMonitorPage() {
       </div>
 
       {/* ═══ 3-COLUMN MAIN ═══ */}
-      <div className="flex-1 grid overflow-hidden" style={{ gridTemplateColumns: '1fr 1fr 320px' }}>
+      {/* Fix #9: responsive via CSS class instead of inline style */}
+      <div className="flex-1 grid overflow-hidden mc-grid-main">
 
         {/* ═══ COL 1: Gantt-style Job List ═══ */}
         <div className="border-e border-[rgb(var(--aegis-overlay)/0.06)] flex flex-col overflow-hidden">
@@ -532,12 +616,12 @@ export function CronMonitorPage() {
                 const isError = status === 'error';
                 const isPaused = status === 'paused';
                 const isSelected = selectedJobId === job.id;
-                const progress = isPaused ? 0 : isError ? 100 : cycleProgress(job);
+                // Fix #5: removed dead `progress` variable (cycleProgress result was never used)
 
                 return (
+                  // Fix #4: layout animation only — no initial/animate that re-fires on poll
                   <motion.div key={job.id}
-                    initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: idx * 0.03 }}
+                    layout transition={{ layout: { duration: 0.15 } }}
                     onClick={() => setSelectedJobId(job.id)}
                     className={clsx(
                       'flex items-stretch gap-0 mb-1.5 rounded-[14px] overflow-hidden cursor-pointer transition-all border',
@@ -583,7 +667,7 @@ export function CronMonitorPage() {
                     <div className="w-[100px] shrink-0 flex flex-col items-end justify-center pe-3 py-2">
                       <span className="text-[8px] text-aegis-text-dim font-medium mb-0.5">Time Left</span>
                       <span className="text-sm font-bold font-mono" style={{
-                        color: isError ? themeHex('danger') : isPaused ? 'rgb(var(--aegis-overlay) / 0.1)' : color,
+                        color: isError ? tc.danger : isPaused ? 'rgb(var(--aegis-overlay) / 0.1)' : color,
                       }}>
                         {isError ? '⚠' : isPaused ? '—' : formatCountdown(getNextRun(job))}
                       </span>
@@ -601,7 +685,7 @@ export function CronMonitorPage() {
                         <div className={clsx(
                           'absolute top-[2px] w-3 h-3 rounded-full transition-all',
                           job.enabled ? 'start-[16px] bg-aegis-primary' : 'start-[2px] bg-[rgb(var(--aegis-overlay)/0.2)]',
-                        )} style={job.enabled ? { boxShadow: `0 0 6px ${themeAlpha('primary', 0.5)}` } : undefined} />
+                        )} style={job.enabled ? { boxShadow: `0 0 6px ${tc.primaryA50}` } : undefined} />
                       </button>
                       {/* Run */}
                       <button onClick={(e) => { e.stopPropagation(); runJob(job.id); }}
@@ -679,7 +763,7 @@ export function CronMonitorPage() {
                   : 'bg-[rgb(var(--aegis-overlay)/0.03)] border-[rgb(var(--aegis-overlay)/0.06)] text-aegis-text-muted',
                 )}>
                   <span className="w-[6px] h-[6px] rounded-full" style={{
-                    background: getStatus(selectedJob) === 'active' ? themeHex('primary') : getStatus(selectedJob) === 'error' ? themeHex('danger') : 'rgb(var(--aegis-overlay) / 0.2)',
+                    background: getStatus(selectedJob) === 'active' ? tc.primary : getStatus(selectedJob) === 'error' ? tc.danger : 'rgb(var(--aegis-overlay) / 0.2)',
                   }} />
                   {getStatus(selectedJob) === 'active' ? 'Active' : getStatus(selectedJob) === 'error' ? 'Error' : 'Paused'}
                   {selectedJob.sessionTarget === 'isolated' && ' · Isolated'}
@@ -688,10 +772,10 @@ export function CronMonitorPage() {
                 {/* Stats */}
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   {[
-                    { v: selectedJobRuns.length || '—', l: 'Total Runs', c: themeHex('primary') },
-                    { v: formatCountdown(getNextRun(selectedJob)), l: 'Time Left', c: themeHex('accent') },
-                    { v: formatDuration(selectedJob.state?.lastDurationMs), l: 'Last Dur.', c: themeHex('warning') },
-                    { v: selectedJobRuns.length > 0 ? `${Math.round(selectedJobRuns.filter(r => r.status === 'ok').length / selectedJobRuns.length * 100)}%` : '—', l: 'Success Rate', c: themeHex('success') },
+                    { v: selectedJobRuns.length || '—', l: 'Total Runs', c: tc.primary },
+                    { v: formatCountdown(getNextRun(selectedJob)), l: 'Time Left', c: tc.accent },
+                    { v: formatDuration(selectedJob.state?.lastDurationMs), l: 'Last Dur.', c: tc.warning },
+                    { v: selectedJobRuns.length > 0 ? `${Math.round(selectedJobRuns.filter(r => r.status === 'ok').length / selectedJobRuns.length * 100)}%` : '—', l: 'Success Rate', c: tc.success },
                   ].map(s => (
                     <div key={s.l} className="p-2.5 rounded-[10px] bg-[rgb(var(--aegis-overlay)/0.02)] border border-[rgb(var(--aegis-overlay)/0.04)]">
                       <div className="text-lg font-extrabold leading-none" style={{ color: s.c }}>{s.v}</div>
@@ -714,7 +798,7 @@ export function CronMonitorPage() {
                         return (
                           <div key={i} className="flex-1 rounded-sm transition-all hover:opacity-80" style={{
                             height: `${h}%`,
-                            background: isOk ? (colorMap[selectedJob.id] || themeHex('primary')) : themeHex('danger'),
+                            background: isOk ? (colorMap[selectedJob.id] || tc.primary) : tc.danger,
                             animation: `mc-bar-grow 0.4s ease-out ${i * 0.03}s backwards`,
                           }} title={`${formatDuration(run.durationMs)} ${isOk ? '✓' : '✗'}`} />
                         );
@@ -771,36 +855,36 @@ export function CronMonitorPage() {
                 <div className="text-[10px] text-aegis-text-dim py-4 px-3">No runs yet</div>
               ) : (
                 <>
+                  {/* Fix #4: no motion animation on log items (they re-rendered every poll) */}
+                  {/* Fix #12: more unique key with index */}
                   {(showAllLogs ? recentRuns : recentRuns.slice(0, 5)).map((run, i) => {
                     const color = colorMap[run.jobId || ''] || dataColor(9);
                     const isOk = run.status === 'ok';
                     return (
-                      <motion.div key={`${run.jobId}-${run.ts}-${i}`}
-                        initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: i * 0.02 }}
+                      <div key={`${run.jobId}-${run.ts}-${run.durationMs}-${i}`}
                         className="flex items-center gap-2 px-2.5 py-2 rounded-lg mb-0.5
                           hover:bg-[rgb(var(--aegis-overlay)/0.02)] transition-colors">
                         <div className="w-1.5 h-1.5 rounded-full shrink-0"
-                          style={{ background: isOk ? color : themeHex('danger') }} />
+                          style={{ background: isOk ? color : tc.danger }} />
                         <div className="flex-1 min-w-0">
                           <div className="text-[11px] font-semibold truncate"
-                            style={!isOk ? { color: themeAlpha('danger', 0.7) } : undefined}>
+                            style={!isOk ? { color: tc.dangerA70 } : undefined}>
                             {run.jobName || 'Job'}
                           </div>
                           <div className="text-[9px] text-aegis-text-dim truncate"
-                            style={!isOk ? { color: themeAlpha('danger', 0.25) } : undefined}>
+                            style={!isOk ? { color: tc.dangerA25 } : undefined}>
                             {run.summary || run.error || (isOk ? 'Completed' : 'Failed')}
                           </div>
                         </div>
                         <div className="text-[8px] font-mono text-aegis-text-dim px-1.5 py-0.5 rounded
                           bg-[rgb(var(--aegis-overlay)/0.02)] shrink-0"
-                          style={!isOk ? { color: themeAlpha('danger', 0.4) } : undefined}>
+                          style={!isOk ? { color: tc.dangerA40 } : undefined}>
                           {formatDuration(run.durationMs)}
                         </div>
                         <div className="text-[9px] text-aegis-text-dim font-mono shrink-0 w-9 text-end">
                           {run.ts ? formatTimeAgo(run.ts).replace(' ago', '') : '—'}
                         </div>
-                      </motion.div>
+                      </div>
                     );
                   })}
                   {/* Show More / Show Less toggle */}
@@ -841,7 +925,7 @@ export function CronMonitorPage() {
                       hover:border-[rgb(var(--aegis-overlay)/0.12)] transition-all">
                       <div className="flex items-center gap-3 mb-2">
                         <div className="w-9 h-9 rounded-lg flex items-center justify-center text-base border shrink-0"
-                          style={{ background: `${tpl.color}10`, borderColor: `${tpl.color}25` }}>
+                          style={{ background: `${dataColor(tpl.colorIdx)}10`, borderColor: `${dataColor(tpl.colorIdx)}25` }}>
                           {tpl.icon}
                         </div>
                         <div className="text-sm font-bold">{tpl.name[lang]}</div>
@@ -869,13 +953,7 @@ export function CronMonitorPage() {
         )}
       </AnimatePresence>
 
-      {/* Keyframes */}
-      <style>{`
-        @keyframes mc-err-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-        @keyframes mc-err-bar { 0%, 100% { opacity: 0.6; } 50% { opacity: 0.3; } }
-        @keyframes mc-bar-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
-        @keyframes mc-dot-ping { 0%, 100% { transform: scale(1); opacity: .8; } 50% { transform: scale(1.5); opacity: 0; } }
-      `}</style>
+      {/* Fix #7: keyframes moved to index.css — no more <style> recreation per render */}
     </div>
   );
 }

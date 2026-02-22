@@ -17,6 +17,13 @@ import * as fs from 'fs';
 import { createTray } from './tray';
 import * as crypto from 'crypto';
 import { execFileSync } from 'child_process';
+// node-pty: dynamic require — graceful fallback if native module unavailable
+let pty: typeof import('node-pty') | null = null;
+try {
+  pty = require('node-pty');
+} catch (err: any) {
+  console.warn('[PTY] node-pty not available — Terminal disabled:', err.message);
+}
 
 // ═══════════════════════════════════════════════════════════
 // Device Identity (Ed25519) — Required for Gateway operator scopes
@@ -152,6 +159,13 @@ let previewWindow: BrowserWindow | null = null;
 let splashWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 
+// ═══════════════════════════════════════════════════════════
+// PTY (Pseudo-Terminal) Management
+// ═══════════════════════════════════════════════════════════
+
+const ptyProcesses = new Map<string, any>();
+let ptyCounter = 0;
+
 function createSplashWindow(): void {
   splashWindow = new BrowserWindow({
     width: 400,
@@ -265,6 +279,7 @@ function createWindow(): void {
         'Content-Security-Policy': [
           "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; " +
           "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; " +
+          "style-src-elem 'self' 'unsafe-inline' https:; " +
           "img-src 'self' data: blob: https: http:; " +
           "media-src 'self' data: blob: https: http:; " +
           "connect-src 'self' ws: wss: http: https:; " +
@@ -591,6 +606,21 @@ function setupIPC(): void {
     } catch (err: any) {
       console.error('[Image] Save failed:', err.message);
       return { success: false, error: err.message };
+    }
+  });
+
+  // ── Native Notifications ──
+  ipcMain.handle('notification:show', (_e, title: string, body: string) => {
+    if (Notification.isSupported()) {
+      const notif = new Notification({ title, body, silent: true });
+      notif.on('click', () => {
+        // Bring window to front when notification is clicked
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.focus();
+        }
+      });
+      notif.show();
     }
   });
 
@@ -951,6 +981,71 @@ function setupIPC(): void {
       return null;
     }
   });
+
+  // ═══════════════════════════════════════════════════════════
+  // PTY — Integrated Terminal (xterm.js ←IPC→ node-pty)
+  // ═══════════════════════════════════════════════════════════
+
+  ipcMain.handle('pty:create', (_e, options?: { cols?: number; rows?: number; cwd?: string }) => {
+    if (!pty) return { id: null, error: 'Terminal not available — node-pty module not loaded' };
+    try {
+      const id = `pty-${++ptyCounter}`;
+      const shell = process.platform === 'win32'
+        ? 'powershell.exe'
+        : (process.env.SHELL || '/bin/bash');
+
+      const ptyProcess = pty.spawn(shell, [], {
+        name: 'xterm-256color',
+        cols: options?.cols || 80,
+        rows: options?.rows || 24,
+        cwd: options?.cwd || process.env.USERPROFILE || process.env.HOME || '.',
+        env: { ...process.env } as Record<string, string>,
+      });
+
+      ptyProcesses.set(id, ptyProcess);
+      console.log(`[PTY] Created ${id} (shell: ${shell}, pid: ${ptyProcess.pid})`);
+
+      // Forward data from PTY → renderer (guard against destroyed window on quit)
+      ptyProcess.onData((data) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('pty:data', id, data);
+        }
+      });
+
+      // Notify renderer when PTY exits
+      ptyProcess.onExit(({ exitCode, signal }) => {
+        console.log(`[PTY] ${id} exited (code: ${exitCode}, signal: ${signal})`);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('pty:exit', id, exitCode, signal);
+        }
+        ptyProcesses.delete(id);
+      });
+
+      return { id, pid: ptyProcess.pid };
+    } catch (err: any) {
+      console.error('[PTY] Create failed:', err.message);
+      return { id: null, error: err.message };
+    }
+  });
+
+  ipcMain.handle('pty:write', (_e, id: string, data: string) => {
+    ptyProcesses.get(id)?.write(data);
+  });
+
+  ipcMain.handle('pty:resize', (_e, id: string, cols: number, rows: number) => {
+    try {
+      ptyProcesses.get(id)?.resize(cols, rows);
+    } catch { /* ignore resize errors on dead PTYs */ }
+  });
+
+  ipcMain.handle('pty:kill', (_e, id: string) => {
+    const p = ptyProcesses.get(id);
+    if (p) {
+      console.log(`[PTY] Killing ${id}`);
+      p.kill();
+      ptyProcesses.delete(id);
+    }
+  });
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1016,7 +1111,12 @@ app.on('will-quit', () => {
 
 app.on('before-quit', () => {
   (app as any).isQuitting = true;
+  // Kill all PTY processes
+  for (const [id, p] of ptyProcesses) {
+    try { p.kill(); console.log(`[PTY] Killed ${id} on quit`); } catch {}
+  }
+  ptyProcesses.clear();
 });
 
-console.log('🛡️ AEGIS Desktop v5.2 started');
+console.log('🛡️ AEGIS Desktop v5.3 started');
 

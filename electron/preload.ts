@@ -103,6 +103,32 @@ const api = {
       ipcRenderer.invoke('image:save', src, suggestedName),
   },
 
+  // ── Integrated Terminal (PTY) ──
+  terminal: {
+    create: (opts?: { cols?: number; rows?: number; cwd?: string }) =>
+      ipcRenderer.invoke('pty:create', opts),
+    write: (id: string, data: string) =>
+      ipcRenderer.invoke('pty:write', id, data),
+    resize: (id: string, cols: number, rows: number) =>
+      ipcRenderer.invoke('pty:resize', id, cols, rows),
+    kill: (id: string) =>
+      ipcRenderer.invoke('pty:kill', id),
+    onData: (callback: (id: string, data: string) => void) => {
+      const handler = (_e: any, id: string, data: string) => callback(id, data);
+      ipcRenderer.on('pty:data', handler);
+      return () => { ipcRenderer.removeListener('pty:data', handler); };
+    },
+    onExit: (callback: (id: string, exitCode: number, signal?: number) => void) => {
+      const handler = (_e: any, id: string, exitCode: number, signal?: number) => callback(id, exitCode, signal);
+      ipcRenderer.on('pty:exit', handler);
+      return () => { ipcRenderer.removeListener('pty:exit', handler); };
+    },
+  },
+
+  // ── Native Notifications ──
+  notify: (title: string, body: string) =>
+    ipcRenderer.invoke('notification:show', title, body),
+
   // ── Device Identity (Ed25519 for Gateway auth) ──
   device: {
     getIdentity: () => ipcRenderer.invoke('device:getIdentity'),
@@ -122,4 +148,4 @@ contextBridge.exposeInMainWorld('aegis', api);
 // Type declaration for renderer
 export type AegisAPI = typeof api;
 
-console.log('🛡️ AEGIS Preload v5.2 ready');
+console.log('🛡️ AEGIS Preload v5.3 ready');

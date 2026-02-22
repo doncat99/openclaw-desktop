@@ -71,6 +71,15 @@ interface AegisAPI {
     requestPairing: (httpBaseUrl: string) => Promise<{ code: string; deviceId: string }>;
     poll: (httpBaseUrl: string, deviceId: string) => Promise<{ status: string; token?: string }>;
   };
+  terminal: {
+    create: (opts?: { cols?: number; rows?: number; cwd?: string }) => Promise<{ id: string; pid: number; error?: string }>;
+    write: (id: string, data: string) => Promise<void>;
+    resize: (id: string, cols: number, rows: number) => Promise<void>;
+    kill: (id: string) => Promise<void>;
+    onData: (callback: (id: string, data: string) => void) => () => void;
+    onExit: (callback: (id: string, exitCode: number, signal?: number) => void) => () => void;
+  };
+  notify: (title: string, body: string) => Promise<void>;
 }
 
 declare global {

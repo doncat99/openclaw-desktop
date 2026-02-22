@@ -189,9 +189,15 @@ class GatewayService {
   private reconnectAttempt = 0;
   private maxReconnects = 10;
 
+  // ── Pairing detection (gentle retry instead of exponential backoff) ──
+  private pairingRequired = false;
+  private pairingRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly PAIRING_RETRY_MS = 5_000; // Retry every 5s when pairing needed
+
   // Current streaming state
   private currentRunId: string | null = null;
   private currentStreamContent: string = '';
+  private lastCompactionTs = 0;
 
   // Device identity challenge nonce (from connect.challenge event)
   private challengeNonce: string | null = null;
@@ -348,6 +354,14 @@ class GatewayService {
       this.connecting = false;
       this.ws = null;
       this.emitStatus();
+
+      // Pairing required — gentle retry instead of exponential backoff
+      if (this.pairingRequired) {
+        this.callbacks?.onScopeError?.('pairing required');
+        this.schedulePairingRetry();
+        return;
+      }
+
       this.scheduleReconnect();
     };
 
@@ -360,6 +374,7 @@ class GatewayService {
 
   disconnect() {
     this.stopHeartbeat();
+    this.stopPairingRetry();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -397,10 +412,18 @@ class GatewayService {
           this.connected = true;
           this.connecting = false;
           this.reconnectAttempt = 0;
+          // Reset pairing state on successful connect
+          this.pairingRequired = false;
+          if (this.pairingRetryTimer) {
+            clearTimeout(this.pairingRetryTimer);
+            this.pairingRetryTimer = null;
+          }
           this.startHeartbeat();
           this.emitStatus();
           // Start central data polling
           startPolling(this);
+          // Enable reasoning streaming so ThinkingBubble works for all users
+          this.enableReasoningStream();
           // Flush any messages queued while disconnected
           this.flushQueue();
         } else {
@@ -412,9 +435,14 @@ class GatewayService {
         }
       },
       reject: (err: any) => {
-        console.error('[GW] ❌ Handshake rejected:', err);
+        const errStr = String(err);
+        console.error('[GW] ❌ Handshake rejected:', errStr);
         this.connecting = false;
-        this.emitStatus({ error: String(err) });
+        // Detect pairing rejection — will switch to gentle retry in onclose
+        if (errStr.toLowerCase().includes('pairing required') || errStr.toLowerCase().includes('pairing_required')) {
+          this.pairingRequired = true;
+        }
+        this.emitStatus({ error: errStr });
       },
     });
 
@@ -550,6 +578,18 @@ class GatewayService {
   /** Override thinking level for a session (null = reset to default). */
   async setSessionThinking(level: string | null, sessionKey = 'agent:main:main'): Promise<any> {
     return this.request('sessions.patch', { key: sessionKey, thinkingLevel: level });
+  }
+
+  /** Enable reasoning visibility so thinking content appears as a separate Reasoning: message.
+   *  'on' sends reasoning as a prefixed message (works on all channels).
+   *  'stream' only works on Telegram preview — not WebSocket clients. */
+  private async enableReasoningStream(sessionKey = 'agent:main:main') {
+    try {
+      await this.request('sessions.patch', { key: sessionKey, reasoningLevel: 'on' });
+      console.log('[GW] 🧠 Reasoning visibility enabled');
+    } catch (err) {
+      console.warn('[GW] Could not enable reasoning:', err);
+    }
   }
 
   /** Update an agent's extra params (e.g. context1m). */
@@ -766,6 +806,29 @@ class GatewayService {
   }
 
   // ═══════════════════════════════════════════════════════════
+  // Thinking Stream Handler — real-time reasoning display
+  //
+  // Gateway sends: { type:"event", event:"chat", payload: {
+  //   stream: "thinking",
+  //   runId, sessionKey?,
+  //   data: {
+  //     text: string,   // full accumulated thinking text
+  //     delta: string,   // new portion only
+  //   }
+  // }}
+  // ═══════════════════════════════════════════════════════════
+  private handleThinkingStream(payload: any) {
+    const data = payload.data ?? {};
+    const text = typeof data.text === 'string' ? data.text : '';
+    const runId = payload.runId || this.currentRunId || '';
+
+    if (!text || !runId) return;
+
+    const store = useChatStore.getState();
+    store.setThinkingStream(runId, text);
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // Event Handler — OpenClaw Protocol
   //
   // Gateway sends: { type:"event", event:"chat", payload: {
@@ -780,6 +843,26 @@ class GatewayService {
   private handleEvent(msg: any) {
     const event = msg.event || '';
     const p = msg.payload || {};
+
+    // ── Direct compaction detection from agent events ──
+    // Instead of relying on polling tokenUsage.compactions (unreliable timing),
+    // intercept the agent compaction event and inject CompactDivider immediately.
+    if (event === 'agent' && p.stream === 'compaction' && p.data?.phase === 'end' && !p.data?.willRetry) {
+      const sk = p.sessionKey || '';
+      if (sk === 'agent:main:main' || !sk) {
+        const now = Date.now();
+        if (now - this.lastCompactionTs > 10_000) { // Dedup: max 1 per 10s
+          this.lastCompactionTs = now;
+          useChatStore.getState().addMessage({
+            id: `compaction-live-${now}`,
+            role: 'compaction' as any,
+            content: '',
+            timestamp: new Date().toISOString(),
+          });
+          console.log('[GW] 📦 Compaction detected — divider injected');
+        }
+      }
+    }
 
     // Non-chat events → forward to central data store
     if (event !== 'chat') {
@@ -802,7 +885,14 @@ class GatewayService {
       return;
     }
 
-    // Compaction stream — handled via tokenUsage.compactions counter polling
+    // ── Thinking stream events (real-time reasoning display) ──
+    // payload.stream === "thinking" → accumulated reasoning text
+    if (p.stream === 'thinking') {
+      this.handleThinkingStream(p);
+      return;
+    }
+
+    // Compaction stream from chat events — already handled above via agent events
     if (p.stream === 'compaction') return;
 
     const state = p.state || '';
@@ -844,6 +934,21 @@ class GatewayService {
 
     // Use runId as the message ID for streaming
     const mId = runId || `msg-${Date.now()}`;
+
+    // ── Reasoning message detection ──
+    // When reasoningLevel='on', Gateway sends reasoning as a separate 'final'
+    // message prefixed with "Reasoning:" BEFORE the actual response.
+    // We intercept it and store as thinking content for the next message.
+    const reasoningPrefix = /^Reasoning:\s*/i;
+    if (state === 'final' && messageText && reasoningPrefix.test(messageText)) {
+      const reasoningText = messageText.replace(reasoningPrefix, '').trim();
+      if (reasoningText) {
+        console.log('[GW] 🧠 Reasoning message captured:', reasoningText.length, 'chars');
+        // Store as live thinking, then it will be finalized onto the next assistant message
+        useChatStore.getState().setThinkingStream(mId, reasoningText);
+      }
+      return; // Don't show as a regular message
+    }
 
     switch (state) {
       case 'delta': {
@@ -890,6 +995,7 @@ class GatewayService {
         const errorText = p.errorMessage || 'حدث خطأ';
         this.currentStreamContent = '';
         this.currentRunId = null;
+        useChatStore.getState().clearThinking();
         this.callbacks?.onStreamEnd(mId, `⚠️ ${errorText}`);
         break;
       }
@@ -897,6 +1003,7 @@ class GatewayService {
       case 'aborted': {
         this.currentStreamContent = '';
         this.currentRunId = null;
+        useChatStore.getState().clearThinking();
         this.callbacks?.onStreamEnd(mId, this.currentStreamContent || '⏹️ تم الإيقاف');
         break;
       }
@@ -924,6 +1031,27 @@ class GatewayService {
     });
   }
 
+  // ── Pairing Retry (gentle 5s interval — no backoff) ──
+
+  private schedulePairingRetry() {
+    if (this.pairingRetryTimer) clearTimeout(this.pairingRetryTimer);
+    this.pairingRetryTimer = setTimeout(() => {
+      if (this.pairingRequired && !this.connected && !this.connecting) {
+        console.log('[GW] 🔑 Pairing retry...');
+        this.connect(this.url, this.token);
+      }
+    }, this.PAIRING_RETRY_MS);
+  }
+
+  /** Stop pairing retry loop (called from cancel or disconnect) */
+  stopPairingRetry() {
+    this.pairingRequired = false;
+    if (this.pairingRetryTimer) {
+      clearTimeout(this.pairingRetryTimer);
+      this.pairingRetryTimer = null;
+    }
+  }
+
   private scheduleReconnect() {
     if (this.reconnectAttempt >= this.maxReconnects) return;
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt), 30000);
@@ -946,6 +1074,7 @@ class GatewayService {
   reconnectWithToken(newToken: string) {
     console.log('[GW] 🔑 Reconnecting with new token');
     this.stopHeartbeat();
+    this.stopPairingRetry();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

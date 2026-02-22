@@ -21,7 +21,7 @@ interface PairingScreenProps {
   errorMessage?: string;
 }
 
-type PairingState = 'idle' | 'requesting' | 'waiting' | 'approved' | 'error';
+type PairingState = 'idle' | 'requesting' | 'waiting' | 'waiting-cli' | 'approved' | 'error';
 
 export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage }: PairingScreenProps) {
   const { t, i18n } = useTranslation();
@@ -103,7 +103,11 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
       if (!mountedRef.current) return;
       console.error('[Pairing] Request failed:', err);
       setError(err.message || 'Failed to request pairing');
-      setState('error');
+      // /v1/pair not available — fall back to CLI approval mode
+      // Gateway is retrying WS connection every 5s in the background;
+      // when the user approves via CLI, the next retry will succeed
+      // and App.tsx onStatusChange will dismiss this screen automatically.
+      setState('waiting-cli');
     }
   }, [gatewayHttpUrl]);
 
@@ -198,7 +202,9 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
               ? 'bg-emerald-500/20 text-emerald-400'
               : state === 'error'
                 ? 'bg-red-500/20 text-red-400'
-                : 'bg-aegis-primary/20 text-aegis-primary'}
+                : state === 'waiting-cli'
+                  ? 'bg-amber-500/20 text-amber-400'
+                  : 'bg-aegis-primary/20 text-aegis-primary'}
             transition-colors duration-500
           `}>
             {state === 'approved' ? (
@@ -207,6 +213,8 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
               <AlertTriangle size={32} />
             ) : state === 'requesting' ? (
               <Loader2 size={32} className="animate-spin" />
+            ) : state === 'waiting-cli' ? (
+              <ShieldCheck size={32} />
             ) : (
               <Key size={32} />
             )}
@@ -218,7 +226,9 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
               ? (isRTL ? 'تم الربط بنجاح!' : 'Paired Successfully!')
               : state === 'error'
                 ? (isRTL ? 'خطأ في الربط' : 'Pairing Error')
-                : (isRTL ? 'ربط مع Gateway' : 'Pair with Gateway')}
+                : state === 'waiting-cli'
+                  ? (isRTL ? 'جهازك يحتاج موافقة' : 'Device Needs Approval')
+                  : (isRTL ? 'ربط مع Gateway' : 'Pair with Gateway')}
           </h2>
 
           {/* Subtitle / Error */}
@@ -289,6 +299,48 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
             </div>
           )}
 
+          {/* Waiting for CLI approval state */}
+          {state === 'waiting-cli' && (
+            <div className="w-full mb-6">
+              <p className="text-sm text-gray-400 mb-4">
+                {isRTL
+                  ? 'جهازك يحتاج موافقة من OpenClaw Gateway. افتح Terminal على جهاز الـ Gateway وشغّل:'
+                  : 'Your device needs approval from OpenClaw Gateway. Open a terminal on the Gateway host and run:'}
+              </p>
+
+              {/* CLI command */}
+              <div className="py-3 px-4 rounded-xl bg-[#0a0a14] border border-[#2a2a3e] font-mono text-sm text-emerald-400 select-all text-start" dir="ltr">
+                openclaw pairing approve
+              </div>
+
+              {/* Alternative instructions */}
+              <div className="mt-4 space-y-2 text-start">
+                <p className="text-xs text-gray-500 flex items-center gap-2">
+                  <ShieldCheck size={14} className="text-aegis-primary shrink-0" />
+                  <span>
+                    {isRTL
+                      ? 'أو وافق من واجهة OpenClaw الرئيسية (Control UI)'
+                      : 'Or approve from the OpenClaw Control UI'}
+                  </span>
+                </p>
+                <p className="text-xs text-gray-500 flex items-center gap-2">
+                  <ShieldCheck size={14} className="text-aegis-primary shrink-0" />
+                  <span>
+                    {isRTL
+                      ? 'الموافقة مطلوبة مرة واحدة فقط — بعدها يشبك تلقائياً'
+                      : 'Approval is needed only once — after that it connects automatically'}
+                  </span>
+                </p>
+              </div>
+
+              {/* Polling indicator */}
+              <div className="mt-5 flex items-center justify-center gap-2 text-xs text-gray-500">
+                <Loader2 size={12} className="animate-spin text-aegis-primary" />
+                <span>{isRTL ? 'في انتظار الموافقة... (يحاول كل 5 ثواني)' : 'Waiting for approval... (retrying every 5s)'}</span>
+              </div>
+            </div>
+          )}
+
           {/* Approved state */}
           {state === 'approved' && (
             <div className="my-4 flex items-center gap-2 text-sm text-emerald-400">
@@ -310,7 +362,7 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
                 <span>{isRTL ? 'إعادة المحاولة' : 'Retry'}</span>
               </button>
             )}
-            {(state === 'error' || state === 'idle') && (
+            {(state === 'error' || state === 'idle' || state === 'waiting-cli') && (
               <button
                 onClick={onCancel}
                 className="flex-1 py-2.5 px-4 rounded-xl border border-[#2a2a3e]
@@ -323,8 +375,8 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
           </div>
         </div>
 
-        {/* Manual Token Entry — fallback when auto-pairing fails */}
-        {(state === 'error' || showManualToken) && (
+        {/* Manual Token Entry — fallback when auto-pairing fails or CLI approval mode */}
+        {(state === 'error' || state === 'waiting-cli' || showManualToken) && (
           <div className="px-8 pb-4">
             <div className="border-t border-[#1e1e30] pt-4">
               {!showManualToken ? (

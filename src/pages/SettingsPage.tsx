@@ -33,12 +33,17 @@ export function SettingsPageFull() {
     memoryLocalPath, setMemoryLocalPath,
     context1mEnabled, setContext1mEnabled,
     toolIntentEnabled, setToolIntentEnabled,
+    gatewayUrl, setGatewayUrl,
+    gatewayToken, setGatewayToken,
   } = useSettingsStore();
   const { connected, connecting } = useChatStore();
   const sessions = useGatewayDataStore((s) => s.sessions);
 
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<'success' | 'fail' | null>(null);
+  const [editUrl, setEditUrl] = useState(gatewayUrl);
+  const [editToken, setEditToken] = useState(gatewayToken);
+  const [connectionDirty, setConnectionDirty] = useState(false);
 
   const mainSession = sessions.find((s) => (s.key || '') === 'agent:main:main');
   const mainModel = mainSession?.model || '—';
@@ -79,18 +84,29 @@ export function SettingsPageFull() {
     }
   };
 
+  const resolveConnectionUrl = async (): Promise<{ url: string; token: string }> => {
+    const userUrl = editUrl.trim();
+    const userToken = editToken.trim();
+    if (userUrl) return { url: userUrl, token: userToken };
+    try {
+      const config = await window.aegis?.config.get();
+      return {
+        url: config?.gatewayUrl || config?.gatewayWsUrl || 'ws://127.0.0.1:18789',
+        token: config?.gatewayToken || '',
+      };
+    } catch {
+      return { url: 'ws://127.0.0.1:18789', token: '' };
+    }
+  };
+
   const handleTestConnection = async () => {
     setTestingConnection(true);
     setTestResult(null);
     try {
-      const config = await window.aegis?.config.get();
-      if (config?.gatewayUrl) {
-        gateway.connect(config.gatewayUrl, config.gatewayToken || '');
-        await new Promise((r) => setTimeout(r, 2000));
-        setTestResult(useChatStore.getState().connected ? 'success' : 'fail');
-      } else {
-        setTestResult('fail');
-      }
+      const { url, token } = await resolveConnectionUrl();
+      gateway.connect(url, token);
+      await new Promise((r) => setTimeout(r, 2500));
+      setTestResult(useChatStore.getState().connected ? 'success' : 'fail');
     } catch {
       setTestResult('fail');
     } finally {
@@ -99,12 +115,17 @@ export function SettingsPageFull() {
   };
 
   const handleReconnect = async () => {
-    try {
-      const config = await window.aegis?.config.get();
-      if (config?.gatewayUrl) {
-        gateway.connect(config.gatewayUrl, config.gatewayToken || '');
-      }
-    } catch { /* silent */ }
+    const { url, token } = await resolveConnectionUrl();
+    gateway.connect(url, token);
+  };
+
+  const handleSaveConnection = () => {
+    setGatewayUrl(editUrl.trim());
+    setGatewayToken(editToken.trim());
+    setConnectionDirty(false);
+    // Reconnect with new settings
+    const url = editUrl.trim() || 'ws://127.0.0.1:18789';
+    gateway.connect(url, editToken.trim());
   };
 
   // Toggle switch — unified design (used everywhere in settings)
@@ -275,14 +296,58 @@ export function SettingsPageFull() {
             </div>
           </div>
 
-          {/* Gateway URL */}
-          <div className="flex items-center justify-between">
-            <div className="text-[13px] text-aegis-text">URL</div>
-            <span className="text-[11px] font-mono text-aegis-text-dim">{localStorage.getItem('aegis-gateway-http')?.replace('http', 'ws') || 'ws://127.0.0.1:18789'}</span>
+          {/* Gateway URL — editable */}
+          <div>
+            <label className="text-[12px] text-aegis-text-muted font-medium mb-1.5 block">
+              WebSocket URL
+            </label>
+            <input
+              type="text"
+              value={editUrl}
+              onChange={(e) => { setEditUrl(e.target.value); setConnectionDirty(true); }}
+              placeholder="ws://127.0.0.1:18789"
+              className="w-full px-3 py-2.5 rounded-xl text-[13px] font-mono
+                bg-[rgb(var(--aegis-overlay)/0.03)] border border-aegis-border
+                text-aegis-text placeholder:text-aegis-text-dim
+                outline-none focus:border-aegis-accent/40 focus:bg-aegis-accent/[0.03] transition-all"
+              dir="ltr"
+            />
+            <div className="text-[10px] text-aegis-text-dim mt-1">
+              {t('settings.gatewayUrlHint', 'اتركه فاضي لاستخدام الافتراضي (ws://127.0.0.1:18789)')}
+            </div>
+          </div>
+
+          {/* Gateway Token — editable */}
+          <div>
+            <label className="text-[12px] text-aegis-text-muted font-medium mb-1.5 block">
+              Gateway Token
+            </label>
+            <input
+              type="password"
+              value={editToken}
+              onChange={(e) => { setEditToken(e.target.value); setConnectionDirty(true); }}
+              placeholder={t('settings.gatewayTokenPlaceholder', 'اختياري — للمصادقة')}
+              className="w-full px-3 py-2.5 rounded-xl text-[13px] font-mono
+                bg-[rgb(var(--aegis-overlay)/0.03)] border border-aegis-border
+                text-aegis-text placeholder:text-aegis-text-dim
+                outline-none focus:border-aegis-accent/40 focus:bg-aegis-accent/[0.03] transition-all"
+              dir="ltr"
+            />
           </div>
 
           {/* Buttons */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {connectionDirty && (
+              <button
+                onClick={handleSaveConnection}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[12px] font-semibold
+                  bg-aegis-primary/15 text-aegis-primary border border-aegis-primary/25
+                  hover:bg-aegis-primary/25 transition-colors"
+              >
+                <CheckCircle size={13} />
+                {t('settings.saveReconnect', 'حفظ وإعادة الاتصال')}
+              </button>
+            )}
             <button
               onClick={handleTestConnection}
               disabled={testingConnection}
@@ -291,7 +356,7 @@ export function SettingsPageFull() {
               {testingConnection ? <Loader2 size={13} className="animate-spin" /> : <Wifi size={13} />}
               {t('settings.testConnection', 'اختبار الاتصال')}
             </button>
-            {!connected && (
+            {!connected && !connectionDirty && (
               <button
                 onClick={handleReconnect}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12px] bg-aegis-primary/10 text-aegis-primary border border-aegis-primary/20 hover:bg-aegis-primary/20 transition-colors"

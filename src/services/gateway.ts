@@ -113,7 +113,7 @@ export interface ChatMessage {
 // ── AEGIS Desktop Client Context ──
 // Injected with the FIRST message only — tells the agent about Desktop capabilities
 // Version from package.json (injected by Vite define plugin or fallback)
-const APP_VERSION = __APP_VERSION__ ?? '5.2.1';
+const APP_VERSION = __APP_VERSION__ ?? '5.3.0';
 
 const AEGIS_DESKTOP_CONTEXT = `[AEGIS_DESKTOP_CONTEXT]
 You are connected via AEGIS Desktop v${APP_VERSION} — an Electron-based OpenClaw Gateway client.

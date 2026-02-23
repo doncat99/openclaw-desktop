@@ -14,7 +14,19 @@
 
 ---
 
-OpenClaw runs your AI agents — AEGIS Desktop lets you see and control everything from one window. Chat, analytics, agent management, cron jobs, skills marketplace, and a built-in terminal. Dark and light themes, full Arabic RTL support, and keyboard-driven navigation.
+## 🤔 Why AEGIS Desktop?
+
+OpenClaw is powerful — but managing it through a terminal or basic webchat leaves a lot on the table. AEGIS Desktop gives it a proper home:
+
+- 💬 **Chat** — streaming responses, artifacts, images, voice, and multi-tab sessions
+- 🔘 **Smart Quick Replies** — clickable buttons when the AI needs your decision
+- 📊 **Analytics** — see exactly what you're spending and where, broken down by model and agent
+- 🤖 **Agent Hub** — manage all your agents from a single panel
+- ⏰ **Cron Monitor** — schedule and control jobs visually
+- 🔧 **Skills & Terminal** — browse the marketplace and run shell commands without leaving the app
+- 🌍 **Bilingual** — full Arabic (RTL) and English (LTR) support out of the box
+
+If you run OpenClaw, AEGIS Desktop is the UI it deserves.
 
 ---
 

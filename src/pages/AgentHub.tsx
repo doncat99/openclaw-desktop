@@ -660,15 +660,15 @@ export function AgentHubPage() {
           <h1 className="text-[28px] font-extrabold text-aegis-text tracking-tight">{t('agents.title', 'Agent Hub')}</h1>
           <p className="text-[13px] text-aegis-text-dim mt-1">
             {t('agents.subtitle', 'Agents and active workers')}
-            <span className="text-aegis-text-dim ms-2">— {registeredAgents.length} {t('agents.agentsCount', 'agents')} · {workers.length} {t('agents.total', 'workers')}</span>
+            <span className="text-aegis-text-dim ms-2">— {registeredAgents.length} {t('agentHubExtra.agentsCount')} · {workers.length} {t('agentHubExtra.workersCount')}</span>
           </p>
         </div>
         <div className="flex items-center gap-2">
           {/* View Switcher */}
           <div className="flex gap-0.5 bg-[rgb(var(--aegis-overlay)/0.02)] border border-[rgb(var(--aegis-overlay)/0.06)] rounded-xl p-1">
             {([
-              { key: 'tree' as const, label: '🌳 Tree' },
-              { key: 'grid' as const, label: '▤ Grid' },
+              { key: 'tree' as const, label: t('agentHubExtra.treeView') },
+              { key: 'grid' as const, label: t('agentHubExtra.gridView') },
               { key: 'activity' as const, label: '⚡ Activity' },
             ]).map(v => (
               <button key={v.key} onClick={() => setViewMode(v.key)}
@@ -857,7 +857,7 @@ export function AgentHubPage() {
               <div>
                 <div className="text-[11px] text-aegis-text-muted uppercase tracking-wider font-semibold mb-3">
                   {t('agents.workers', 'Active Workers')}
-                  <span className="text-aegis-text-dim ms-2">— {workers.filter(w => w.running).length} running · {workers.length} total</span>
+                  <span className="text-aegis-text-dim ms-2">— {workers.filter(w => w.running).length} {t('agentHubExtra.runningCount')} · {workers.length} {t('agentHubExtra.totalCount')}</span>
                 </div>
                 {workers.length === 0 ? (
                   <GlassCard>

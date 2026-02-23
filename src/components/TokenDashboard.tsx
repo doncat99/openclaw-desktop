@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Zap, TrendingUp, Clock, Layers, RefreshCw, Activity } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getDirection } from '@/i18n';
 import { gateway } from '@/services/gateway';
+import { timeAgo as timeAgoFmt } from '@/utils/format';
 import clsx from 'clsx';
 
 // ═══════════════════════════════════════════════════════════
@@ -29,9 +31,11 @@ interface TokenDashboardProps {
 }
 
 export function TokenDashboard({ open, onClose }: TokenDashboardProps) {
+  const { t } = useTranslation();
   const { tokenUsage } = useChatStore();
   const { language } = useSettingsStore();
   const dir = getDirection(language);
+  const dateLocale = language === 'ar' ? 'ar-SA' : 'en-US';
   const [sessions, setSessions] = useState<SessionDetail[]>([]);
   const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -45,7 +49,7 @@ export function TokenDashboard({ open, onClose }: TokenDashboardProps) {
       const details: SessionDetail[] = rawSessions.map((s: any) => {
         const key = s.key || s.sessionKey || 'unknown';
         let label = s.label || s.name || key;
-        if (key === 'agent:main:main') label = 'الجلسة الرئيسية';
+        if (key === 'agent:main:main') label = t('dashboard.mainSession');
         else if (key.startsWith('agent:main:')) label = key.split(':').pop() || key;
 
         // Gateway returns: totalTokens (used), contextTokens (max capacity)
@@ -107,20 +111,19 @@ export function TokenDashboard({ open, onClose }: TokenDashboardProps) {
     try {
       const d = new Date(ts);
       if (isNaN(d.getTime())) return '—';
-      const now = Date.now();
-      const diff = now - d.getTime();
-      if (diff < 60000) return 'الآن';
-      if (diff < 3600000) return `قبل ${Math.floor(diff / 60000)} د`;
-      if (diff < 86400000) return `قبل ${Math.floor(diff / 3600000)} س`;
-      return d.toLocaleDateString('ar-SA', { month: 'short', day: 'numeric' });
+      const diff = Date.now() - d.getTime();
+      // For recent times, use the shared i18n-aware timeAgo
+      if (diff < 86400000) return timeAgoFmt(ts);
+      // For older dates, use locale-aware date
+      return d.toLocaleDateString(dateLocale, { month: 'short', day: 'numeric' });
     } catch { return '—'; }
   };
 
   const getUsageColor = (pct: number) => {
-    if (pct > 85) return { text: 'text-aegis-danger', bg: 'bg-aegis-danger', label: 'حرج' };
-    if (pct > 60) return { text: 'text-aegis-warning', bg: 'bg-aegis-warning', label: 'مرتفع' };
-    if (pct > 30) return { text: 'text-aegis-primary', bg: 'bg-aegis-primary', label: 'طبيعي' };
-    return { text: 'text-aegis-success', bg: 'bg-aegis-success', label: 'منخفض' };
+    if (pct > 85) return { text: 'text-aegis-danger', bg: 'bg-aegis-danger', label: t('token.critical') };
+    if (pct > 60) return { text: 'text-aegis-warning', bg: 'bg-aegis-warning', label: t('token.high') };
+    if (pct > 30) return { text: 'text-aegis-primary', bg: 'bg-aegis-primary', label: t('token.normal') };
+    return { text: 'text-aegis-success', bg: 'bg-aegis-success', label: t('token.low') };
   };
 
   // Total stats
@@ -150,9 +153,9 @@ export function TokenDashboard({ open, onClose }: TokenDashboardProps) {
               <Activity size={18} className="text-aegis-primary" />
             </div>
             <div>
-              <h2 className="text-[15px] font-semibold text-aegis-text">استهلاك التوكنز</h2>
+              <h2 className="text-[15px] font-semibold text-aegis-text">{t('dashboard.totalTokens')}</h2>
               <p className="text-[10px] text-aegis-text-dim">
-                {lastRefresh ? `آخر تحديث: ${lastRefresh.toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}` : ''}
+                {lastRefresh ? `${t('token.lastUpdate')}: ${lastRefresh.toLocaleTimeString(dateLocale, { hour: '2-digit', minute: '2-digit' })}` : ''}
               </p>
             </div>
           </div>
@@ -161,7 +164,7 @@ export function TokenDashboard({ open, onClose }: TokenDashboardProps) {
               onClick={loadDetails}
               disabled={loading}
               className="p-2 rounded-xl hover:bg-[rgb(var(--aegis-overlay)/0.04)] transition-colors"
-              title="تحديث"
+              title={t('token.refresh')}
             >
               <RefreshCw size={14} className={clsx('text-aegis-text-dim', loading && 'animate-spin')} />
             </button>
@@ -194,14 +197,14 @@ export function TokenDashboard({ open, onClose }: TokenDashboardProps) {
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
                 <span className={clsx('text-[20px] font-bold', mainColor.text)}>{mainPct}%</span>
-                <span className="text-[9px] text-aegis-text-dim">سياق</span>
+                <span className="text-[9px] text-aegis-text-dim">{t('token.context')}</span>
               </div>
             </div>
 
             {/* Main Stats */}
             <div className="flex-1 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-[12px] text-aegis-text-muted">الجلسة الرئيسية</span>
+                <span className="text-[12px] text-aegis-text-muted">{t('dashboard.mainSession')}</span>
                 <span className={clsx('text-[10px] px-2 py-0.5 rounded-full border', 
                   mainPct > 85 ? 'bg-aegis-danger/10 text-aegis-danger border-aegis-danger/20' :
                   mainPct > 60 ? 'bg-aegis-warning/10 text-aegis-warning border-aegis-warning/20' :
@@ -213,7 +216,7 @@ export function TokenDashboard({ open, onClose }: TokenDashboardProps) {
 
               <div className="space-y-1.5">
                 <div className="flex justify-between text-[11px]">
-                  <span className="text-aegis-text-dim">التوكنز</span>
+                  <span className="text-aegis-text-dim">{t('token.tokens')}</span>
                   <span className="text-aegis-text font-mono">
                     {formatTokens(mainSession?.contextTokens || tokenUsage?.contextTokens || 0)}
                     <span className="text-aegis-text-dim"> / {formatTokens(mainSession?.maxTokens || tokenUsage?.maxTokens || 200000)}</span>
@@ -231,7 +234,7 @@ export function TokenDashboard({ open, onClose }: TokenDashboardProps) {
               {(mainSession?.compactions || 0) > 0 && (
                 <div className="text-[10px] text-aegis-text-dim flex items-center gap-1">
                   <Layers size={10} />
-                  {mainSession?.compactions} عملية ضغط
+                  {mainSession?.compactions} {t('token.compactionOps')}
                 </div>
               )}
             </div>
@@ -240,9 +243,9 @@ export function TokenDashboard({ open, onClose }: TokenDashboardProps) {
           {/* ── Quick Stats Grid ── */}
           <div className="grid grid-cols-3 gap-3">
             {[
-              { icon: Zap, label: 'إجمالي التوكنز', value: formatTokens(totalTokens), color: 'text-aegis-primary' },
-              { icon: Layers, label: 'عمليات الضغط', value: String(totalCompactions), color: 'text-aegis-warning' },
-              { icon: TrendingUp, label: 'جلسات نشطة', value: String(activeSessions), color: 'text-aegis-accent' },
+              { icon: Zap, label: t('token.totalTokens'), value: formatTokens(totalTokens), color: 'text-aegis-primary' },
+              { icon: Layers, label: t('token.compactions'), value: String(totalCompactions), color: 'text-aegis-warning' },
+              { icon: TrendingUp, label: t('token.activeSessions'), value: String(activeSessions), color: 'text-aegis-accent' },
             ].map(({ icon: Icon, label, value, color }) => (
               <div key={label} className="p-3.5 rounded-xl bg-aegis-surface/40 border border-aegis-border/15 text-center">
                 <Icon size={16} className={clsx(color, 'mx-auto mb-1.5')} />
@@ -257,7 +260,7 @@ export function TokenDashboard({ open, onClose }: TokenDashboardProps) {
             <div>
               <h3 className="text-[12px] font-medium text-aegis-text-muted mb-3 flex items-center gap-2">
                 <Clock size={12} />
-                تفاصيل الجلسات
+                {t('token.sessionDetails')}
               </h3>
               <div className="space-y-2">
                 {sessions.map((session) => {
@@ -318,7 +321,7 @@ export function TokenDashboard({ open, onClose }: TokenDashboardProps) {
           {mainSession?.model && mainSession.model !== '—' && (
             <div className="p-3.5 rounded-xl bg-aegis-surface/30 border border-aegis-border/10">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] text-aegis-text-dim">الموديل الحالي</span>
+                <span className="text-[11px] text-aegis-text-dim">{t('token.currentModel')}</span>
                 <span className="text-[11px] text-aegis-primary font-mono">{mainSession.model}</span>
               </div>
             </div>

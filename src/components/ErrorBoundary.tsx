@@ -1,4 +1,5 @@
 import React from 'react';
+import i18n from '@/i18n';
 
 interface Props {
   children: React.ReactNode;
@@ -28,9 +29,9 @@ export class ErrorBoundary extends React.Component<Props, State> {
       return (
         <div className="flex flex-col items-center justify-center h-full bg-aegis-bg text-aegis-text p-8">
           <div className="text-4xl mb-4">💥</div>
-          <h2 className="text-xl font-bold mb-2">حصل خطأ!</h2>
+          <h2 className="text-xl font-bold mb-2">{i18n.t('errors.crashTitle')}</h2>
           <p className="text-aegis-text-muted text-sm mb-4 text-center max-w-md">
-            {this.state.error?.message || 'خطأ غير معروف'}
+            {this.state.error?.message || i18n.t('errors.unknown')}
           </p>
           <pre className="text-xs text-aegis-text-dim bg-aegis-surface p-4 rounded-lg max-w-lg overflow-auto max-h-40 mb-4" dir="ltr">
             {this.state.error?.stack?.substring(0, 500)}
@@ -39,7 +40,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
             onClick={() => this.setState({ hasError: false, error: null })}
             className="px-6 py-2 bg-aegis-primary text-white rounded-xl hover:bg-aegis-primary-hover"
           >
-            إعادة المحاولة
+            {i18n.t('errors.retry')}
           </button>
         </div>
       );

@@ -32,6 +32,9 @@ interface CronJob {
     lastStatus?: string;
     lastError?: string;
     lastDurationMs?: number;
+    // Gateway 2026.2.22+: split run vs delivery status
+    lastRunStatus?: string;
+    lastDeliveryStatus?: string;
   };
 }
 
@@ -43,6 +46,8 @@ interface RunEntry {
   durationMs?: number;
   jobId?: string;
   jobName?: string;
+  // Gateway 2026.2.22+: split delivery status
+  deliveryStatus?: string;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -72,39 +77,53 @@ const getNextRun = (job: CronJob) => job.state?.nextRunAtMs || job.nextRun;
 const getLastRun = (job: CronJob) => job.state?.lastRunAtMs || job.lastRun;
 const getStatus = (job: CronJob): 'active' | 'error' | 'paused' => {
   if (!job.enabled) return 'paused';
-  if (job.state?.lastStatus === 'error') return 'error';
+  // Check both legacy lastStatus and new split fields (Gateway 2026.2.22+)
+  const runStatus = job.state?.lastRunStatus || job.state?.lastStatus;
+  if (runStatus === 'error') return 'error';
   return 'active';
+};
+
+/** Get delivery status for display (Gateway 2026.2.22+) */
+const getDeliveryStatus = (job: CronJob): 'delivered' | 'failed' | 'unknown' | null => {
+  const ds = job.state?.lastDeliveryStatus;
+  if (!ds || ds === 'not-delivered') return null; // Not available or isolated job (no delivery target)
+  if (ds === 'delivered' || ds === 'ok') return 'delivered';
+  if (ds === 'failed' || ds === 'error') return 'failed';
+  return 'unknown';
 };
 
 // ── Templates ──
 
 // Fix #8: colorIdx instead of dataColor() at module load (CSS vars may not be ready)
-const CRON_TEMPLATES = [
-  {
-    id: 'morning-briefing', icon: '⚡', colorIdx: 2,
-    name: { en: 'Morning Briefing', ar: 'إحاطة الصباح' },
-    desc: { en: 'Weather, news, and memory review every morning', ar: 'طقس، أخبار، ومراجعة الذاكرة كل صباح' },
-    job: { name: 'Morning Briefing', schedule: { kind: 'cron', expr: '0 6 * * *', tz: 'UTC' }, payload: { kind: 'agentTurn', message: 'Good morning! Prepare a brief morning briefing: 1) Check the weather for my location, 2) Search for top news headlines today, 3) Check memory files for any upcoming tasks, reminders, or deadlines. Keep it concise and useful.' }, sessionTarget: 'isolated', enabled: true },
-  },
-  {
-    id: 'weekly-digest', icon: '📝', colorIdx: 1,
-    name: { en: 'Weekly Digest', ar: 'ملخص أسبوعي' },
-    desc: { en: 'End-of-week summary and memory cleanup', ar: 'ملخص نهاية الأسبوع وتنظيف الذاكرة' },
-    job: { name: 'Weekly Digest', schedule: { kind: 'cron', expr: '0 20 * * 5', tz: 'UTC' }, payload: { kind: 'agentTurn', message: 'Weekly review time. 1) Read through this week\'s memory files, 2) Summarize key events and decisions, 3) Update MEMORY.md with important info, 4) Clean up outdated entries.' }, sessionTarget: 'isolated', enabled: true },
-  },
-  {
-    id: 'check-in', icon: '🧠', colorIdx: 3,
-    name: { en: 'Check-In', ar: 'تواصل دوري' },
-    desc: { en: 'Periodic nudge if anything needs attention', ar: 'يتواصل معك كل فترة إذا في شي مهم' },
-    job: { name: 'Check-In', schedule: { kind: 'every', everyMs: 28800000 }, payload: { kind: 'agentTurn', message: 'Time for a check-in. Review recent memory files and sessions for context. If there are pending tasks or anything worth following up on, reach out. If nothing needs attention, skip silently.' }, sessionTarget: 'isolated', enabled: true },
-  },
-  {
-    id: 'system-health', icon: '🔍', colorIdx: 5,
-    name: { en: 'System Health', ar: 'صحة النظام' },
-    desc: { en: 'Disk, RAM, uptime, and process monitoring', ar: 'مساحة التخزين، الرام، وفحص العمليات' },
-    job: { name: 'System Health Check', schedule: { kind: 'every', everyMs: 21600000 }, payload: { kind: 'agentTurn', message: 'Run a system health check: 1) Check disk space, 2) Check memory usage, 3) Check uptime, 4) Look for unusual processes. Report only if something needs attention.' }, sessionTarget: 'isolated', enabled: true },
-  },
-];
+// Templates use i18n keys — resolved at render time via getCronTemplates()
+function getCronTemplates(t: (key: string) => string) {
+  return [
+    {
+      id: 'morning-briefing', icon: '⚡', colorIdx: 2,
+      name: t('cronTemplates.morningName'),
+      desc: t('cronTemplates.morningDesc'),
+      job: { name: 'Morning Briefing', schedule: { kind: 'cron', expr: '0 6 * * *', tz: 'UTC' }, payload: { kind: 'agentTurn', message: 'Good morning! Prepare a brief morning briefing: 1) Check the weather for my location, 2) Search for top news headlines today, 3) Check memory files for any upcoming tasks, reminders, or deadlines. Keep it concise and useful.' }, sessionTarget: 'isolated', enabled: true },
+    },
+    {
+      id: 'weekly-digest', icon: '📝', colorIdx: 1,
+      name: t('cronTemplates.weeklyName'),
+      desc: t('cronTemplates.weeklyDesc'),
+      job: { name: 'Weekly Digest', schedule: { kind: 'cron', expr: '0 20 * * 5', tz: 'UTC' }, payload: { kind: 'agentTurn', message: 'Weekly review time. 1) Read through this week\'s memory files, 2) Summarize key events and decisions, 3) Update MEMORY.md with important info, 4) Clean up outdated entries.' }, sessionTarget: 'isolated', enabled: true },
+    },
+    {
+      id: 'check-in', icon: '🧠', colorIdx: 3,
+      name: t('cronTemplates.checkInName'),
+      desc: t('cronTemplates.checkInDesc'),
+      job: { name: 'Check-In', schedule: { kind: 'every', everyMs: 28800000 }, payload: { kind: 'agentTurn', message: 'Time for a check-in. Review recent memory files and sessions for context. If there are pending tasks or anything worth following up on, reach out. If nothing needs attention, skip silently.' }, sessionTarget: 'isolated', enabled: true },
+    },
+    {
+      id: 'system-health', icon: '🔍', colorIdx: 5,
+      name: t('cronTemplates.healthName'),
+      desc: t('cronTemplates.healthDesc'),
+      job: { name: 'System Health Check', schedule: { kind: 'every', everyMs: 21600000 }, payload: { kind: 'agentTurn', message: 'Run a system health check: 1) Check disk space, 2) Check memory usage, 3) Check uptime, 4) Look for unusual processes. Report only if something needs attention.' }, sessionTarget: 'isolated', enabled: true },
+    },
+  ];
+}
 
 // ── Formatting ──
 
@@ -346,7 +365,7 @@ function ClockFace({ jobs, colorMap, selectedId, onSelect }: {
 export function CronMonitorPage() {
   const { t, i18n } = useTranslation();
   const { connected } = useChatStore();
-  const lang = i18n.language?.startsWith('en') ? 'en' : 'ar';
+  // lang removed — templates now use i18n keys directly
 
   // ── State (jobs from central store) ──
   const storeJobs = useGatewayDataStore((s) => s.cronJobs) as CronJob[];
@@ -531,7 +550,9 @@ export function CronMonitorPage() {
     }
   };
 
-  const addTemplate = async (tpl: typeof CRON_TEMPLATES[0]) => {
+  const cronTemplates = useMemo(() => getCronTemplates(t), [t]);
+
+  const addTemplate = async (tpl: ReturnType<typeof getCronTemplates>[0]) => {
     setActionLoading(`tpl-${tpl.id}`);
     try {
       await gateway.call('cron.add', { job: tpl.job }); await refreshGroup('cron');
@@ -659,13 +680,13 @@ export function CronMonitorPage() {
                             ✓ {formatTimeAgo(getLastRun(job))}
                           </span>
                         )}
-                        {isPaused && <span className="text-aegis-warning/50">paused</span>}
+                        {isPaused && <span className="text-aegis-warning/50">{t('cronDetail.paused').toLowerCase()}</span>}
                       </div>
                     </div>
 
                     {/* Time Left */}
                     <div className="w-[100px] shrink-0 flex flex-col items-end justify-center pe-3 py-2">
-                      <span className="text-[8px] text-aegis-text-dim font-medium mb-0.5">Time Left</span>
+                      <span className="text-[8px] text-aegis-text-dim font-medium mb-0.5">{t('cron.timeLeft', 'Time Left')}</span>
                       <span className="text-sm font-bold font-mono" style={{
                         color: isError ? tc.danger : isPaused ? 'rgb(var(--aegis-overlay) / 0.1)' : color,
                       }}>
@@ -765,17 +786,31 @@ export function CronMonitorPage() {
                   <span className="w-[6px] h-[6px] rounded-full" style={{
                     background: getStatus(selectedJob) === 'active' ? tc.primary : getStatus(selectedJob) === 'error' ? tc.danger : 'rgb(var(--aegis-overlay) / 0.2)',
                   }} />
-                  {getStatus(selectedJob) === 'active' ? 'Active' : getStatus(selectedJob) === 'error' ? 'Error' : 'Paused'}
-                  {selectedJob.sessionTarget === 'isolated' && ' · Isolated'}
+                  {getStatus(selectedJob) === 'active' ? t('cronDetail.active') : getStatus(selectedJob) === 'error' ? t('cronDetail.error') : t('cronDetail.paused')}
+                  {selectedJob.sessionTarget === 'isolated' && ` · ${t('cronDetail.isolated')}`}
                 </div>
+                {/* Delivery status badge (Gateway 2026.2.22+) */}
+                {getDeliveryStatus(selectedJob) && (
+                  <div className={clsx(
+                    'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-[0.5px] border mb-3',
+                    getDeliveryStatus(selectedJob) === 'delivered' ? 'bg-aegis-success/[0.08] border-aegis-success/15 text-aegis-success ms-2'
+                    : getDeliveryStatus(selectedJob) === 'failed' ? 'bg-aegis-danger/[0.08] border-aegis-danger/15 text-aegis-danger ms-2'
+                    : 'bg-[rgb(var(--aegis-overlay)/0.03)] border-[rgb(var(--aegis-overlay)/0.06)] text-aegis-text-muted ms-2',
+                  )}>
+                    <span className="w-[6px] h-[6px] rounded-full" style={{
+                      background: getDeliveryStatus(selectedJob) === 'delivered' ? tc.success : getDeliveryStatus(selectedJob) === 'failed' ? tc.danger : 'rgb(var(--aegis-overlay) / 0.2)',
+                    }} />
+                    {getDeliveryStatus(selectedJob) === 'delivered' ? t('cron.delivered') : getDeliveryStatus(selectedJob) === 'failed' ? t('cron.deliveryFailed') : t('cron.deliveryUnknown')}
+                  </div>
+                )}
 
                 {/* Stats */}
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   {[
-                    { v: selectedJobRuns.length || '—', l: 'Total Runs', c: tc.primary },
-                    { v: formatCountdown(getNextRun(selectedJob)), l: 'Time Left', c: tc.accent },
-                    { v: formatDuration(selectedJob.state?.lastDurationMs), l: 'Last Dur.', c: tc.warning },
-                    { v: selectedJobRuns.length > 0 ? `${Math.round(selectedJobRuns.filter(r => r.status === 'ok').length / selectedJobRuns.length * 100)}%` : '—', l: 'Success Rate', c: tc.success },
+                    { v: selectedJobRuns.length || '—', l: t('cron.totalRuns', 'Total Runs'), c: tc.primary },
+                    { v: formatCountdown(getNextRun(selectedJob)), l: t('cron.timeLeft', 'Time Left'), c: tc.accent },
+                    { v: formatDuration(selectedJob.state?.lastDurationMs), l: t('cron.lastDur', 'Last Dur.'), c: tc.warning },
+                    { v: selectedJobRuns.length > 0 ? `${Math.round(selectedJobRuns.filter(r => r.status === 'ok').length / selectedJobRuns.length * 100)}%` : '—', l: t('cron.successRate', 'Success Rate'), c: tc.success },
                   ].map(s => (
                     <div key={s.l} className="p-2.5 rounded-[10px] bg-[rgb(var(--aegis-overlay)/0.02)] border border-[rgb(var(--aegis-overlay)/0.04)]">
                       <div className="text-lg font-extrabold leading-none" style={{ color: s.c }}>{s.v}</div>
@@ -788,7 +823,7 @@ export function CronMonitorPage() {
                 {selectedJobRuns.length > 0 && (
                   <>
                     <div className="text-[9px] uppercase tracking-[1px] text-aegis-text-dim font-bold mb-1.5">
-                      Last {selectedJobRuns.length} Runs
+                      {t('cron.lastNRuns', 'Last {{n}} Runs').replace('{{n}}', String(selectedJobRuns.length))}
                     </div>
                     <div className="flex items-end gap-[3px] h-8 mb-3">
                       {selectedJobRuns.map((run, i) => {
@@ -816,14 +851,14 @@ export function CronMonitorPage() {
                       hover:bg-aegis-primary/15 transition-colors disabled:opacity-40">
                     {actionLoading === `run-${selectedJob.id}`
                       ? <Loader2 size={12} className="animate-spin mx-auto" />
-                      : runResult[selectedJob.id] === 'ok' ? '✓ Done' : '▶ Run Now'}
+                      : runResult[selectedJob.id] === 'ok' ? t('cronDetail.done') : t('cronDetail.runNow')}
                   </button>
                   <button onClick={() => toggleJob(selectedJob.id, !selectedJob.enabled)}
                     disabled={!!actionLoading}
                     className="flex-1 py-2 rounded-[10px] text-center text-[11px] font-bold
                       bg-[rgb(var(--aegis-overlay)/0.02)] border border-[rgb(var(--aegis-overlay)/0.06)] text-aegis-text-muted
                       hover:text-aegis-text-secondary transition-colors disabled:opacity-40">
-                    {selectedJob.enabled ? '⏸ Pause' : '▶ Enable'}
+                    {selectedJob.enabled ? t('cronDetail.pause') : t('cronDetail.enable')}
                   </button>
                 </div>
               </motion.div>
@@ -839,7 +874,7 @@ export function CronMonitorPage() {
           <div className="flex-1 flex flex-col overflow-hidden">
             <div className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-[rgb(var(--aegis-overlay)/0.06)]
               bg-aegis-bg-frosted backdrop-blur-sm">
-              <h4 className="text-[11px] font-bold uppercase tracking-[1.5px] text-aegis-text-muted">Activity Log</h4>
+              <h4 className="text-[11px] font-bold uppercase tracking-[1.5px] text-aegis-text-muted">{t('cronDetail.activityLog')}</h4>
               <div className="flex items-center gap-1.5 text-[8px] font-extrabold text-aegis-primary uppercase tracking-[1px]">
                 <div className="w-[5px] h-[5px] rounded-full bg-aegis-primary"
                   style={{ animation: 'mc-dot-ping 2s ease-in-out infinite' }} />
@@ -892,7 +927,7 @@ export function CronMonitorPage() {
                     <button onClick={() => setShowAllLogs(!showAllLogs)}
                       className="w-full py-2 mt-1 rounded-lg text-[10px] font-semibold
                         text-aegis-accent/50 hover:text-aegis-accent hover:bg-aegis-accent/[0.04] transition-colors">
-                      {showAllLogs ? `▲ Show Less` : `▼ Show More (${recentRuns.length - 5})`}
+                      {showAllLogs ? t('cronDetail.showLess') : t('cronDetail.showMore', { n: recentRuns.length - 5 })}
                     </button>
                   )}
                 </>
@@ -916,7 +951,7 @@ export function CronMonitorPage() {
               <h3 className="text-base font-extrabold mb-1">Quick Templates</h3>
               <p className="text-[11px] text-aegis-text-dim mb-5">Add a pre-configured job with one click</p>
               <div className="grid grid-cols-2 gap-3">
-                {CRON_TEMPLATES.map(tpl => {
+                {cronTemplates.map(tpl => {
                   const isAdded = templateResult[tpl.id] === 'ok';
                   const isFailed = templateResult[tpl.id] === 'error';
                   const isLoading = actionLoading === `tpl-${tpl.id}`;
@@ -928,9 +963,9 @@ export function CronMonitorPage() {
                           style={{ background: `${dataColor(tpl.colorIdx)}10`, borderColor: `${dataColor(tpl.colorIdx)}25` }}>
                           {tpl.icon}
                         </div>
-                        <div className="text-sm font-bold">{tpl.name[lang]}</div>
+                        <div className="text-sm font-bold">{tpl.name}</div>
                       </div>
-                      <div className="text-[10px] text-aegis-text-muted leading-relaxed mb-3">{tpl.desc[lang]}</div>
+                      <div className="text-[10px] text-aegis-text-muted leading-relaxed mb-3">{tpl.desc}</div>
                       <button onClick={() => addTemplate(tpl)} disabled={isLoading || isAdded}
                         className={clsx(
                           'w-full py-2 rounded-lg text-[11px] font-semibold border transition-all',
@@ -938,7 +973,7 @@ export function CronMonitorPage() {
                           : isFailed ? 'bg-aegis-danger/10 border-aegis-danger/30 text-aegis-danger'
                           : 'bg-[rgb(var(--aegis-overlay)/0.03)] border-[rgb(var(--aegis-overlay)/0.08)] text-aegis-text-muted hover:text-aegis-accent hover:border-aegis-accent/30',
                         )}>
-                        {isLoading ? '...' : isAdded ? '✓ Added' : isFailed ? '✗ Error' : '+ Add'}
+                        {isLoading ? '...' : isAdded ? t('cronDetail.added') : isFailed ? t('cronDetail.addError') : t('cronDetail.add')}
                       </button>
                     </div>
                   );

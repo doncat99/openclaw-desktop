@@ -239,7 +239,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   getCachedMessages: (key) => get().messagesPerSession[key],
 
   // ── Sessions ──
-  sessions: [{ key: MAIN_SESSION, label: 'الجلسة الرئيسية' }],
+  sessions: [{ key: MAIN_SESSION, label: 'Main Session' }],
   activeSessionKey: MAIN_SESSION,
 
   setSessions: (sessions) => set({ sessions }),

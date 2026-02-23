@@ -19,9 +19,9 @@ import { themeHex, themeAlpha } from '@/utils/theme-colors';
 // ── Column config ────────────────────────────────────────
 
 const COLUMNS = [
-  { key: 'queue',      label: 'Queue',       dotVar: 'warning' },
-  { key: 'inProgress', label: 'In Progress', dotVar: 'accent'  },
-  { key: 'done',       label: 'Done',        dotVar: 'success' },
+  { key: 'queue',      labelKey: 'workshopExtra.queue',      dotVar: 'warning' },
+  { key: 'inProgress', labelKey: 'workshopExtra.inProgress', dotVar: 'accent'  },
+  { key: 'done',       labelKey: 'workshopExtra.done',       dotVar: 'success' },
 ] as const;
 
 // ── Priority helpers ─────────────────────────────────────
@@ -73,6 +73,7 @@ function timeAgo(iso: string): string {
 // ═══════════════════════════════════════════════════════════
 
 function StatsRow({ tasks }: { tasks: Task[] }) {
+  const { t } = useTranslation();
   const total = tasks.length;
   const queue = tasks.filter((t) => t.status === 'queue').length;
   const active = tasks.filter((t) => t.status === 'inProgress').length;
@@ -80,10 +81,10 @@ function StatsRow({ tasks }: { tasks: Task[] }) {
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
 
   const cards = [
-    { emoji: '📋', value: total,  label: 'Total Tasks',  color: 'accent'  },
-    { emoji: '⏳', value: queue,  label: 'In Queue',     color: 'warning' },
-    { emoji: '⚡', value: active, label: 'In Progress',  color: 'primary' },
-    { emoji: '✓',  value: done,   label: 'Completed',    color: 'success', extra: total > 0 ? `${pct}%` : undefined },
+    { emoji: '📋', value: total,  label: t('workshopExtra.totalTasks'),  color: 'accent'  },
+    { emoji: '⏳', value: queue,  label: t('workshopExtra.inQueue'),     color: 'warning' },
+    { emoji: '⚡', value: active, label: t('workshopExtra.inProgress'),  color: 'primary' },
+    { emoji: '✓',  value: done,   label: t('workshopExtra.completed'),   color: 'success', extra: total > 0 ? `${pct}%` : undefined },
   ];
 
   return (
@@ -131,6 +132,7 @@ function StatsRow({ tasks }: { tasks: Task[] }) {
 // ═══════════════════════════════════════════════════════════
 
 function CompletionBar({ tasks }: { tasks: Task[] }) {
+  const { t } = useTranslation();
   const total = tasks.length;
   if (total === 0) return null;
   const done = tasks.filter((t) => t.status === 'done').length;
@@ -157,9 +159,9 @@ function CompletionBar({ tasks }: { tasks: Task[] }) {
       {/* Legend */}
       <div className="flex items-center gap-3 ms-2">
         {[
-          { label: 'Done', color: themeHex('success') },
-          { label: 'Active', color: themeHex('accent') },
-          { label: 'Queue', color: themeAlpha('warning', 0.5) },
+          { label: t('workshopExtra.done'), color: themeHex('success') },
+          { label: t('workshopExtra.active'), color: themeHex('accent') },
+          { label: t('workshopExtra.queue'), color: themeAlpha('warning', 0.5) },
         ].map((l) => (
           <div key={l.label} className="flex items-center gap-1">
             <div className="w-1.5 h-1.5 rounded-full" style={{ background: l.color }} />
@@ -653,7 +655,7 @@ export function WorkshopPage() {
 
       {/* ═══ Kanban Grid ═══ */}
       <div className="flex-1 grid grid-cols-3 gap-4 min-h-0">
-        {COLUMNS.map(({ key, label, dotVar }) => {
+        {COLUMNS.map(({ key, labelKey, dotVar }) => {
           const columnTasks = filteredTasks.filter((t) => t.status === key);
           const columnIds = columnTasks.map((t) => t.id);
 
@@ -669,7 +671,7 @@ export function WorkshopPage() {
                 {/* Column header */}
                 <div className="flex items-center gap-2.5 px-4 py-3 shrink-0">
                   <div className="w-2 h-2 rounded-full shrink-0" style={{ background: `rgb(var(--aegis-${dotVar}))` }} />
-                  <span className="text-[13px] font-bold text-aegis-text flex-1">{label}</span>
+                  <span className="text-[13px] font-bold text-aegis-text flex-1">{t(labelKey)}</span>
                   <span
                     className="text-[11px] font-semibold w-[22px] h-[22px] flex items-center justify-center rounded-full"
                     style={{

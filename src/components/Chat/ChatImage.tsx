@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Download, Maximize2, X, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -42,7 +43,7 @@ function resolveImageSrc(src: string): string {
 
 // ── Extract filename from src ──
 function extractFilename(src: string, alt?: string): string {
-  if (alt && alt !== 'image' && alt !== 'مرفق' && !alt.startsWith('http')) {
+  if (alt && alt !== 'image' && alt !== t('media.attachment') && !alt.startsWith('http')) {
     // Sanitize alt as filename
     const sanitized = alt.replace(/[<>:"/\\|?*]/g, '_').slice(0, 60);
     if (sanitized.match(/\.\w{2,4}$/)) return sanitized;
@@ -195,7 +196,7 @@ function Lightbox({ src, alt, onClose }: LightboxProps) {
 
       {/* Bottom hint */}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[11px] text-aegis-text-dim select-none">
-        Scroll to zoom · Drag to pan · R to rotate · 0 to reset · Esc to close
+        {t('media.imageControls')}
       </div>
     </div>
   );
@@ -206,6 +207,7 @@ function Lightbox({ src, alt, onClose }: LightboxProps) {
 // ═══════════════════════════════════════════════════════════
 
 export function ChatImage({ src, alt, maxWidth = '100%', maxHeight = '400px', className }: ChatImageProps) {
+  const { t } = useTranslation();
   const [showLightbox, setShowLightbox] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -262,7 +264,7 @@ export function ChatImage({ src, alt, maxWidth = '100%', maxHeight = '400px', cl
               onClick={handleSave}
               className="p-1.5 rounded-lg backdrop-blur-sm transition-all"
               style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgb(var(--aegis-overlay) / 0.1)' }}
-              title="حفظ الصورة"
+              title={t('media.saveImage')}
             >
               <Download size={14} className="text-aegis-text hover:text-white" />
             </button>
@@ -270,7 +272,7 @@ export function ChatImage({ src, alt, maxWidth = '100%', maxHeight = '400px', cl
               onClick={handleExpand}
               className="p-1.5 rounded-lg backdrop-blur-sm transition-all"
               style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgb(var(--aegis-overlay) / 0.1)' }}
-              title="تكبير"
+              title={t('media.zoom')}
             >
               <Maximize2 size={14} className="text-aegis-text hover:text-white" />
             </button>
@@ -278,7 +280,7 @@ export function ChatImage({ src, alt, maxWidth = '100%', maxHeight = '400px', cl
         )}
 
         {/* Alt text */}
-        {alt && alt !== 'image' && alt !== 'مرفق' && (
+        {alt && alt !== 'image' && alt !== t('media.attachment') && (
           <span className="text-[11px] text-aegis-text-muted mt-1" style={{ display: 'block' }}>{alt}</span>
         )}
       </span>

@@ -85,7 +85,10 @@ export interface CronJob {
   schedule?: any;
   enabled?: boolean;
   lastRun?: string;
-  state?: string;
+  state?: any;
+  // Gateway 2026.2.22+: split run vs delivery status
+  lastRunStatus?: string;
+  lastDeliveryStatus?: string;
   [k: string]: any;
 }
 

@@ -130,7 +130,17 @@
     "templates": "Templates",
     "templatesHint": "Quick start with these templates — click to add",
     "templateAdded": "Added!",
-    "activeJobs": "Active Jobs"
+    "activeJobs": "Active Jobs",
+    "runStatus": "Run Status",
+    "deliveryStatus": "Delivery Status",
+    "delivered": "Delivered",
+    "deliveryFailed": "Delivery Failed",
+    "deliveryUnknown": "Delivery Unknown",
+    "totalRuns": "Total Runs",
+    "timeLeft": "Time Left",
+    "lastDur": "Last Dur.",
+    "successRate": "Success Rate",
+    "lastNRuns": "Last {{n}} Runs"
   },
   "agents": {
     "title": "Agent Hub",
@@ -239,7 +249,8 @@
     "resend": "Resend",
     "availableSessions": "Available Sessions",
     "newTab": "New Tab",
-    "noOtherSessions": "No other sessions"
+    "noOtherSessions": "No other sessions",
+    "stopped": "Stopped"
   },
   "titlebar": {
     "minimize": "Minimize",
@@ -297,5 +308,206 @@
     "title": "Not Connected",
     "description": "Unable to connect to OpenClaw Gateway. The app will reconnect automatically when the gateway becomes available.",
     "retrying": "Attempting to reconnect..."
+  },
+  "notifications": {
+    "newMessage": "New Message",
+    "replyComplete": "Reply Complete",
+    "connected": "Connected",
+    "connectedBody": "Successfully connected to Gateway",
+    "paired": "Paired",
+    "pairedBody": "AEGIS Desktop successfully paired with Gateway"
+  },
+  "token": {
+    "lastUpdate": "Last update",
+    "critical": "Critical",
+    "high": "High",
+    "normal": "Normal",
+    "low": "Low",
+    "context": "Context",
+    "tokens": "Tokens",
+    "compactionOps": "compactions",
+    "totalTokens": "Total Tokens",
+    "compactions": "Compactions",
+    "activeSessions": "Active Sessions",
+    "sessionDetails": "Session Details",
+    "currentModel": "Current Model",
+    "refresh": "Refresh"
+  },
+  "format": {
+    "now": "now",
+    "minutesShort": "{{n}}m",
+    "hoursShort": "{{n}}h",
+    "daysShort": "{{n}}d",
+    "lessThanMinute": "<1m",
+    "uptimeMinutes": "{{n}}m",
+    "uptimeHoursMinutes": "{{h}}h {{m}}m",
+    "uptimeHoursOnly": "{{h}}h"
+  },
+  "notificationCenter": {
+    "title": "Notifications",
+    "clearAll": "Clear all",
+    "empty": "No notifications"
+  },
+  "errors": {
+    "occurred": "An error occurred",
+    "unknown": "Unknown error",
+    "unexpected": "An unexpected error occurred",
+    "crashTitle": "Something went wrong!",
+    "retry": "Retry",
+    "tryAgain": "Try again"
+  },
+  "code": {
+    "copyCode": "Copy code",
+    "copied": "Copied",
+    "copy": "Copy"
+  },
+  "media": {
+    "playbackSpeed": "Playback speed",
+    "unmute": "Unmute",
+    "mute": "Mute",
+    "muteAudio": "Mute audio",
+    "saveImage": "Save image",
+    "saveVideo": "Save video",
+    "zoom": "Zoom",
+    "fullscreen": "Fullscreen",
+    "videoLoadError": "Failed to load video",
+    "imageControls": "Scroll to zoom · Drag to pan · R to rotate · 0 to reset · Esc to close",
+    "attachment": "Attachment",
+    "audioLoadError": "Failed to load audio"
+  },
+  "thinking": {
+    "thinking": "Thinking…",
+    "thoughtProcess": "Thought Process",
+    "lines": "lines",
+    "chars": "chars"
+  },
+  "pairing": {
+    "pairedSuccess": "Paired Successfully!",
+    "pairingError": "Pairing Error",
+    "needsApproval": "Device Needs Approval",
+    "pairWithGateway": "Pair with Gateway",
+    "enterCode": "Enter this code in Gateway:",
+    "openTerminal": "Open Terminal and run: openclaw gateway approve",
+    "orApproveFromUI": "Or approve from the OpenClaw Control UI",
+    "waitingApproval": "Waiting for approval...",
+    "requestingPairing": "Requesting pairing...",
+    "needsApprovalDesc": "Your device needs approval from OpenClaw Gateway. Open Terminal on the Gateway machine and run:",
+    "orApproveFromUIFull": "Or approve from the OpenClaw Control UI (Dashboard)",
+    "oneTimeOnly": "Approval is needed once only — after that it connects automatically",
+    "waitingApprovalRetry": "Waiting for approval... (retrying every 5s)",
+    "reconnecting": "Reconnecting...",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "enterTokenManually": "Enter token manually",
+    "enterTokenDesc": "Enter the Gateway Token from OpenClaw settings:",
+    "pasteToken": "Paste token here...",
+    "connect": "Connect",
+    "tokenExplanation": "AEGIS Desktop needs a valid token to connect to the OpenClaw Gateway. This pairing is done once only."
+  },
+  "settingsExtra": {
+    "theme": "Theme",
+    "connectionStatus": "Connection Status",
+    "tokenPlaceholder": "Optional — for authentication",
+    "saveReconnect": "Save & Reconnect",
+    "model": "Model",
+    "activeModel": "Active Model",
+    "provider": "Provider",
+    "contextWindow": "Context Window",
+    "modelNote": "Changed from Gateway settings",
+    "shortcuts": "Keyboard Shortcuts",
+    "navigatePages": "Navigate Pages",
+    "newTab": "New Tab",
+    "closeTab": "Close Tab",
+    "nextTab": "Next Tab",
+    "openSettings": "Settings",
+    "refresh": "Refresh",
+    "closeModal": "Close",
+    "context1mDesc": "Enable Anthropic 1M context beta for Opus / Sonnet — increases context to 1,000,000 tokens",
+    "toolIntentLabel": "Tool Intent View",
+    "toolIntentDesc": "Show tool calls in chat as cards with input/output — hidden by default",
+    "copySystemInfo": "Copy System Info"
+  },
+  "commandPaletteFooter": {
+    "noResults": "No results",
+    "navigate": "navigate",
+    "execute": "execute",
+    "close": "close"
+  },
+  "cronDetail": {
+    "active": "Active",
+    "error": "Error",
+    "paused": "Paused",
+    "isolated": "Isolated",
+    "done": "✓ Done",
+    "runNow": "▶ Run Now",
+    "running": "Running...",
+    "pause": "⏸ Pause",
+    "enable": "▶ Enable",
+    "activityLog": "Activity Log",
+    "showLess": "▲ Show Less",
+    "showMore": "▼ Show More ({{n}})",
+    "added": "✓ Added",
+    "addError": "✗ Error",
+    "add": "+ Add",
+    "errorLabel": "✗ {{msg}}"
+  },
+  "cronTemplates": {
+    "morningName": "Morning Briefing",
+    "morningDesc": "Weather, news, and memory review every morning",
+    "weeklyName": "Weekly Digest",
+    "weeklyDesc": "End-of-week summary and memory cleanup",
+    "checkInName": "Check-In",
+    "checkInDesc": "Periodic nudge if anything needs attention",
+    "healthName": "System Health",
+    "healthDesc": "Disk, RAM, uptime, and process monitoring"
+  },
+  "dashboardExtra": {
+    "contextCompacted": "Context compacted ×{{n}}"
+  },
+  "memoryExplorer": {
+    "title": "Memory Explorer",
+    "noMemoriesGraph": "No memories to visualize",
+    "noMemoriesTimeline": "No memories yet",
+    "noMemoriesCards": "No memories found",
+    "importance": "importance",
+    "relatedMemories": "Related Memories",
+    "graphView": "🕸️ Graph",
+    "timelineView": "📅 Timeline",
+    "cardsView": "🗃️ Cards",
+    "catAll": "All",
+    "catTechnical": "Technical",
+    "catProjects": "Projects",
+    "catDecisions": "Decisions",
+    "catPeople": "People",
+    "catSkills": "Skills",
+    "catPreferences": "Preferences",
+    "catEvents": "Events",
+    "catGeneral": "General"
+  },
+  "agentHubExtra": {
+    "treeView": "🌳 Tree",
+    "gridView": "▤ Grid",
+    "agentsCount": "agents",
+    "workersCount": "workers",
+    "runningCount": "running",
+    "totalCount": "total"
+  },
+  "workshopExtra": {
+    "queue": "Queue",
+    "inProgress": "In Progress",
+    "done": "Done",
+    "totalTasks": "Total Tasks",
+    "inQueue": "In Queue",
+    "completed": "Completed",
+    "active": "Active"
+  },
+  "skillsExtra": {
+    "featured": "⭐ Featured",
+    "installs": "Installs",
+    "requirements": "🔧 Requirements"
+  },
+  "settingsTheme": {
+    "dark": "🌙 Dark Mode",
+    "light": "☀️ Light Mode"
   }
 }

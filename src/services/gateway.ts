@@ -12,6 +12,38 @@ import { startPolling, stopPolling, handleGatewayEvent } from '@/stores/gatewayD
 import { useChatStore } from '@/stores/chatStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { parseButtons } from '@/utils/buttonParser';
+import i18n from '@/i18n';
+
+// ── Platform Detection (cross-platform) ──
+function detectPlatform(): string {
+  const ua = (navigator.userAgent || '').toLowerCase();
+  if (ua.includes('mac')) return 'macos';
+  if (ua.includes('linux')) return 'linux';
+  return 'windows';
+}
+
+// ── Locale from app language ──
+function getAppLocale(): string {
+  const lang = i18n.language || 'en';
+  if (lang.startsWith('ar')) return 'ar-SA';
+  return 'en-US';
+}
+
+// ── Strip agent directive tags from assistant messages ──
+// Gateway 2026.2.22+ strips these server-side, but we keep client-side
+// stripping as defense-in-depth for older gateways.
+function stripDirectiveTags(text: string): string {
+  let clean = text;
+  // Reply/audio directive tags
+  clean = clean.replace(/\[\[reply_to_current\]\]/gi, '');
+  clean = clean.replace(/\[\[reply_to:[^\]]*\]\]/gi, '');
+  clean = clean.replace(/\[\[audio_as_voice\]\]/gi, '');
+  // Untrusted content wrappers (should never reach UI)
+  clean = clean.replace(/<<<EXTERNAL_UNTRUSTED_CONTENT[\s\S]*?<<<END_EXTERNAL_UNTRUSTED_CONTENT>>>/g, '');
+  clean = clean.replace(/<<<EXTERNAL_UNTRUSTED_CONTENT[^>]*>>>/g, '');
+  clean = clean.replace(/<<<END_EXTERNAL_UNTRUSTED_CONTENT>>>/g, '');
+  return clean.trim();
+}
 
 // ── Workshop Command Parser ──
 // Parses [[workshop:action ...]] commands from agent messages
@@ -113,7 +145,7 @@ export interface ChatMessage {
 // ── AEGIS Desktop Client Context ──
 // Injected with the FIRST message only — tells the agent about Desktop capabilities
 // Version from package.json (injected by Vite define plugin or fallback)
-const APP_VERSION = __APP_VERSION__ ?? '5.3.0';
+import { APP_VERSION } from '@/hooks/useAppVersion';
 
 const AEGIS_DESKTOP_CONTEXT = `[AEGIS_DESKTOP_CONTEXT]
 You are connected via AEGIS Desktop v${APP_VERSION} — an Electron-based OpenClaw Gateway client.
@@ -202,6 +234,9 @@ class GatewayService {
   // Device identity challenge nonce (from connect.challenge event)
   private challengeNonce: string | null = null;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Stable per-window instance ID for diagnostics and duplicate connection prevention
+  private readonly instanceId = crypto.randomUUID?.() || `aegis-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   // ── Heartbeat (activity-based dead connection detection) ──
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
@@ -328,13 +363,15 @@ class GatewayService {
     this.ws.onopen = () => {
       console.log('[GW] Open — waiting for connect.challenge...');
       this.challengeNonce = null;
-      // Wait up to 750ms for challenge; if it doesn't arrive, send without nonce
+      // Wait up to 2s for challenge nonce (v2 auth).
+      // If it doesn't arrive, proceed without device signature (token-only auth).
+      // Gateway 2026.2.22+ rejects v1 signatures, so we never send unsigned device payloads.
       this.connectTimer = setTimeout(() => {
         if (this.connecting) {
-          console.log('[GW] No challenge received — sending handshake without nonce');
+          console.log('[GW] No challenge received — proceeding with token-only auth');
           this.sendHandshake();
         }
-      }, 750);
+      }, 2000);
     };
 
     this.ws.onmessage = (event) => {
@@ -355,9 +392,14 @@ class GatewayService {
       this.ws = null;
       this.emitStatus();
 
+      // Close code 1008 = pairing required (Gateway scope rejection)
+      if (event.code === 1008) {
+        this.pairingRequired = true;
+      }
+
       // Pairing required — gentle retry instead of exponential backoff
       if (this.pairingRequired) {
-        this.callbacks?.onScopeError?.('pairing required');
+        this.callbacks?.onScopeError?.(event.reason || 'pairing required');
         this.schedulePairingRetry();
         return;
       }
@@ -447,29 +489,40 @@ class GatewayService {
     });
 
     // Build device identity if available (Electron IPC)
+    // Gateway 2026.2.22+ requires v2 signatures — unsigned device objects are rejected.
+    // If no challenge nonce arrived, skip device entirely and use token-only auth.
     let device: any = undefined;
     try {
-      if (window.aegis?.device?.sign) {
+      if (window.aegis?.device?.sign && this.challengeNonce) {
         const signed = await window.aegis.device.sign({
-          nonce: this.challengeNonce || undefined,
+          nonce: this.challengeNonce,
           clientId,
           clientMode,
           role: 'operator',
           scopes,
           token: this.token || '',
         });
-        device = {
-          id: signed.deviceId,
-          publicKey: signed.publicKey,
-          signature: signed.signature,
-          signedAt: signed.signedAt,
-          nonce: signed.nonce,
-        };
-        console.log('[GW] 🔑 Device identity attached:', signed.deviceId.substring(0, 16) + '...');
+        if (signed.signature) {
+          device = {
+            id: signed.deviceId,
+            publicKey: signed.publicKey,
+            signature: signed.signature,
+            signedAt: signed.signedAt,
+            nonce: signed.nonce,
+          };
+          console.log('[GW] 🔑 Device identity attached (v2):', signed.deviceId.substring(0, 16) + '...');
+        } else {
+          console.warn('[GW] Device signing returned no signature — skipping device auth');
+        }
+      } else if (!this.challengeNonce) {
+        console.log('[GW] No challenge nonce — using token-only auth');
       }
     } catch (err) {
       console.warn('[GW] Device identity unavailable:', err);
     }
+
+    const platform = detectPlatform();
+    const locale = getAppLocale();
 
     this.send({
       type: 'req',
@@ -481,7 +534,7 @@ class GatewayService {
         client: {
           id: clientId,
           version: APP_VERSION,
-          platform: 'windows',
+          platform,
           mode: clientMode,
         },
         role: 'operator',
@@ -491,8 +544,8 @@ class GatewayService {
         permissions: {},
         auth: { token: this.token },
         device,
-        locale: 'ar-SA',
-        userAgent: `aegis-desktop/${APP_VERSION}`,
+        locale,
+        userAgent: `aegis-desktop/${APP_VERSION} (${platform})`,
       },
     });
   }
@@ -964,10 +1017,19 @@ class GatewayService {
       }
 
       case 'final': {
-        // Message complete — use the final text or what we accumulated
+        // Message complete — use the most complete version available.
+        // When tools are called mid-response, the final event may only contain
+        // post-tool text. In that case, keep the accumulated streaming content
+        // which includes the full pre-tool response the user already saw.
         let finalText = messageText || this.currentStreamContent;
+        if (this.currentStreamContent && this.currentStreamContent.length > (messageText?.length || 0)) {
+          finalText = this.currentStreamContent;
+        }
         this.currentStreamContent = '';
         this.currentRunId = null;
+
+        // Strip directive tags (defense-in-depth — Gateway 2026.2.22+ strips server-side)
+        finalText = stripDirectiveTags(finalText);
         
         // Parse and execute Workshop commands
         const { cleanContent, executed } = parseAndExecuteWorkshopCommands(finalText);
@@ -992,7 +1054,7 @@ class GatewayService {
       }
 
       case 'error': {
-        const errorText = p.errorMessage || 'حدث خطأ';
+        const errorText = p.errorMessage || i18n.t('errors.occurred');
         this.currentStreamContent = '';
         this.currentRunId = null;
         useChatStore.getState().clearThinking();
@@ -1004,7 +1066,7 @@ class GatewayService {
         this.currentStreamContent = '';
         this.currentRunId = null;
         useChatStore.getState().clearThinking();
-        this.callbacks?.onStreamEnd(mId, this.currentStreamContent || '⏹️ تم الإيقاف');
+        this.callbacks?.onStreamEnd(mId, this.currentStreamContent || `⏹️ ${i18n.t('chat.stopped', 'Stopped')}`);
         break;
       }
 
@@ -1101,7 +1163,7 @@ class GatewayService {
       body: JSON.stringify({
         clientId: 'openclaw-control-ui',
         clientName: 'AEGIS Desktop',
-        platform: 'windows',
+        platform: detectPlatform(),
         scopes: ['operator.read', 'operator.write', 'operator.admin'],
       }),
     });

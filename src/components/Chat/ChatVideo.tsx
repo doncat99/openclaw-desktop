@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Download, Maximize2, X, Play, Pause, Volume2, VolumeX } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -77,6 +78,7 @@ async function saveVideo(src: string, suggestedName: string): Promise<void> {
 // ═══════════════════════════════════════════════════════════
 
 export function ChatVideo({ src, alt, maxWidth = '100%', maxHeight = '400px', className }: ChatVideoProps) {
+  const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [hovered, setHovered] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -129,7 +131,7 @@ export function ChatVideo({ src, alt, maxWidth = '100%', maxHeight = '400px', cl
   if (error) {
     return (
       <span className="inline-block my-2 px-3 py-2 rounded-lg bg-red-500/10 text-red-400 text-[12px]">
-        ⚠️ فشل تحميل الفيديو
+        ⚠️ {t('media.videoLoadError')}
       </span>
     );
   }
@@ -203,7 +205,7 @@ export function ChatVideo({ src, alt, maxWidth = '100%', maxHeight = '400px', cl
             onClick={toggleMute}
             className="p-1.5 rounded-lg backdrop-blur-sm transition-all"
             style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgb(var(--aegis-overlay) / 0.1)' }}
-            title={muted ? 'تشغيل الصوت' : 'كتم الصوت'}
+            title={muted ? t('media.unmute') : t('media.muteAudio')}
           >
             {muted ? (
               <VolumeX size={14} className="text-aegis-text hover:text-white" />
@@ -215,7 +217,7 @@ export function ChatVideo({ src, alt, maxWidth = '100%', maxHeight = '400px', cl
             onClick={handleSave}
             className="p-1.5 rounded-lg backdrop-blur-sm transition-all"
             style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgb(var(--aegis-overlay) / 0.1)' }}
-            title="حفظ الفيديو"
+            title={t('media.saveVideo')}
           >
             <Download size={14} className="text-aegis-text hover:text-white" />
           </button>
@@ -223,7 +225,7 @@ export function ChatVideo({ src, alt, maxWidth = '100%', maxHeight = '400px', cl
             onClick={handleFullscreen}
             className="p-1.5 rounded-lg backdrop-blur-sm transition-all"
             style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgb(var(--aegis-overlay) / 0.1)' }}
-            title="ملء الشاشة"
+            title={t('media.fullscreen')}
           >
             <Maximize2 size={14} className="text-aegis-text hover:text-white" />
           </button>

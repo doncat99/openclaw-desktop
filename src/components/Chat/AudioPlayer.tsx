@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Play, Pause, Volume2, VolumeX, RotateCcw } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -13,6 +14,7 @@ interface AudioPlayerProps {
 }
 
 export function AudioPlayer({ src, className }: AudioPlayerProps) {
+  const { t } = useTranslation();
   const audioRef = useRef<HTMLAudioElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
 
@@ -217,7 +219,7 @@ export function AudioPlayer({ src, className }: AudioPlayerProps) {
   if (error) {
     return (
       <div className={clsx('flex items-center gap-2 py-2 px-3 rounded-xl bg-aegis-danger/10 border border-aegis-danger/20', className)}>
-        <span className="text-[12px] text-aegis-danger">⚠️ Failed to load audio</span>
+        <span className="text-[12px] text-aegis-danger">⚠️ {t('media.audioLoadError', 'Failed to load audio')}</span>
       </div>
     );
   }
@@ -277,7 +279,7 @@ export function AudioPlayer({ src, className }: AudioPlayerProps) {
         <button
           onClick={cycleSpeed}
           className="px-1.5 py-0.5 rounded text-[10px] font-mono text-aegis-text-dim hover:text-aegis-text-muted hover:bg-aegis-surface transition-colors"
-          title="سرعة التشغيل"
+          title={t('media.playbackSpeed')}
         >
           {playbackRate}x
         </button>
@@ -286,7 +288,7 @@ export function AudioPlayer({ src, className }: AudioPlayerProps) {
         <button
           onClick={toggleMute}
           className="p-1 rounded hover:bg-aegis-surface text-aegis-text-dim hover:text-aegis-text-muted transition-colors"
-          title={muted ? 'تشغيل الصوت' : 'كتم'}
+          title={muted ? t('media.unmute') : t('media.mute')}
         >
           {muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
         </button>

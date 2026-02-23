@@ -2,6 +2,7 @@
 // Skills Page — Sub-components
 // ═══════════════════════════════════════════════════════════
 
+import { useTranslation } from 'react-i18next';
 import { X, Loader2, Copy, ExternalLink, Download, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
@@ -96,6 +97,7 @@ const SKILL_COLORS = [
 ];
 
 function HubBadge({ badge }: { badge?: 'official' | 'featured' }) {
+  const { t } = useTranslation();
   if (!badge) return null;
   if (badge === 'official') {
     return (
@@ -108,7 +110,7 @@ function HubBadge({ badge }: { badge?: 'official' | 'featured' }) {
   return (
     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold
       bg-aegis-accent/[0.08] border border-aegis-accent/15 text-aegis-accent">
-      ⭐ Featured
+      {t('skillsExtra.featured')}
     </span>
   );
 }
@@ -282,6 +284,7 @@ export function SkillDetailPanel({ open, skill, loading, onClose }: {
   loading: boolean;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       {/* Backdrop */}
@@ -356,7 +359,7 @@ export function SkillDetailPanel({ open, skill, loading, onClose }: {
               {[
                 { value: formatNum(skill.downloads), label: 'Downloads' },
                 { value: String(skill.stars), label: 'Stars' },
-                { value: formatNum(skill.installs), label: 'Installs' },
+                { value: formatNum(skill.installs), label: t('skillsExtra.installs') },
               ].map(s => (
                 <div key={s.label} className="p-2.5 text-center bg-[rgb(var(--aegis-overlay)/0.015)]">
                   <div className="text-base font-bold">{s.value}</div>
@@ -400,7 +403,7 @@ export function SkillDetailPanel({ open, skill, loading, onClose }: {
             {(skill.requirements.env.length > 0 || skill.requirements.bin.length > 0) && (
               <div className="px-6 py-4">
                 <h3 className="text-[12px] font-semibold text-aegis-text-muted uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  🔧 Requirements
+                  {t('skillsExtra.requirements')}
                 </h3>
                 <div className="flex flex-wrap gap-1.5">
                   {skill.requirements.env.map(e => (

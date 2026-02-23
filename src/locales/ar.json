@@ -121,7 +121,17 @@
     "templates": "قوالب جاهزة",
     "templatesHint": "ابدأ بسرعة مع هذي القوالب — اضغط لإضافتها",
     "templateAdded": "تمت الإضافة!",
-    "activeJobs": "المهام النشطة"
+    "activeJobs": "المهام النشطة",
+    "runStatus": "حالة التشغيل",
+    "deliveryStatus": "حالة التوصيل",
+    "delivered": "تم التوصيل",
+    "deliveryFailed": "فشل التوصيل",
+    "deliveryUnknown": "غير معروف",
+    "totalRuns": "إجمالي التشغيلات",
+    "timeLeft": "الوقت المتبقي",
+    "lastDur": "آخر مدة",
+    "successRate": "نسبة النجاح",
+    "lastNRuns": "آخر {{n}} تشغيلات"
   },
   "agents": {
     "title": "مركز العمليات",
@@ -206,7 +216,8 @@
     "newMessages": "رسائل جديدة",
     "copy": "نسخ",
     "copied": "تم النسخ!",
-    "resend": "إعادة إرسال"
+    "resend": "إعادة إرسال",
+    "stopped": "تم الإيقاف"
   },
   "titlebar": {
     "minimize": "تصغير",
@@ -264,5 +275,206 @@
     "title": "غير متصل",
     "description": "تعذر الاتصال بـ OpenClaw Gateway. سيُعاد الاتصال تلقائياً عندما تكون البوابة متاحة.",
     "retrying": "جاري محاولة إعادة الاتصال..."
+  },
+  "notifications": {
+    "newMessage": "رسالة جديدة",
+    "replyComplete": "اكتمل الرد",
+    "connected": "متصل",
+    "connectedBody": "تم الاتصال بالـ Gateway بنجاح",
+    "paired": "تم الربط",
+    "pairedBody": "تم ربط AEGIS Desktop بالـ Gateway بنجاح"
+  },
+  "token": {
+    "lastUpdate": "آخر تحديث",
+    "critical": "حرج",
+    "high": "مرتفع",
+    "normal": "طبيعي",
+    "low": "منخفض",
+    "context": "سياق",
+    "tokens": "التوكنز",
+    "compactionOps": "عملية ضغط",
+    "totalTokens": "إجمالي التوكنز",
+    "compactions": "عمليات الضغط",
+    "activeSessions": "جلسات نشطة",
+    "sessionDetails": "تفاصيل الجلسات",
+    "currentModel": "الموديل الحالي",
+    "refresh": "تحديث"
+  },
+  "format": {
+    "now": "الآن",
+    "minutesShort": "{{n}}د",
+    "hoursShort": "{{n}}س",
+    "daysShort": "{{n}}ي",
+    "lessThanMinute": "<1م",
+    "uptimeMinutes": "{{n}}م",
+    "uptimeHoursMinutes": "{{h}}س {{m}}م",
+    "uptimeHoursOnly": "{{h}}س"
+  },
+  "notificationCenter": {
+    "title": "الإشعارات",
+    "clearAll": "مسح الكل",
+    "empty": "لا توجد إشعارات"
+  },
+  "errors": {
+    "occurred": "حدث خطأ",
+    "unknown": "خطأ غير معروف",
+    "unexpected": "حدث خطأ غير متوقع",
+    "crashTitle": "حصل خطأ!",
+    "retry": "إعادة المحاولة",
+    "tryAgain": "حاول مرة ثانية"
+  },
+  "code": {
+    "copyCode": "نسخ الكود",
+    "copied": "تم",
+    "copy": "نسخ"
+  },
+  "media": {
+    "playbackSpeed": "سرعة التشغيل",
+    "unmute": "تشغيل الصوت",
+    "mute": "كتم",
+    "muteAudio": "كتم الصوت",
+    "saveImage": "حفظ الصورة",
+    "saveVideo": "حفظ الفيديو",
+    "zoom": "تكبير",
+    "fullscreen": "ملء الشاشة",
+    "videoLoadError": "فشل تحميل الفيديو",
+    "imageControls": "سكرول للتكبير · اسحب للتنقل · R للتدوير · 0 للرجوع · Esc للإغلاق",
+    "attachment": "مرفق",
+    "audioLoadError": "فشل تحميل الصوت"
+  },
+  "thinking": {
+    "thinking": "يفكر…",
+    "thoughtProcess": "عملية التفكير",
+    "lines": "سطر",
+    "chars": "حرف"
+  },
+  "pairing": {
+    "pairedSuccess": "تم الربط بنجاح!",
+    "pairingError": "خطأ في الربط",
+    "needsApproval": "جهازك يحتاج موافقة",
+    "pairWithGateway": "ربط مع Gateway",
+    "enterCode": "أدخل هذا الكود في Gateway:",
+    "openTerminal": "افتح Terminal وشغّل: openclaw gateway approve",
+    "orApproveFromUI": "أو وافق من واجهة OpenClaw الرئيسية",
+    "waitingApproval": "في انتظار الموافقة...",
+    "requestingPairing": "جاري طلب الربط...",
+    "needsApprovalDesc": "جهازك يحتاج موافقة من OpenClaw Gateway. افتح Terminal على جهاز الـ Gateway وشغّل:",
+    "orApproveFromUIFull": "أو وافق من واجهة OpenClaw الرئيسية (Control UI)",
+    "oneTimeOnly": "الموافقة مطلوبة مرة واحدة فقط — بعدها يشبك تلقائياً",
+    "waitingApprovalRetry": "في انتظار الموافقة... (يحاول كل 5 ثواني)",
+    "reconnecting": "جاري إعادة الاتصال...",
+    "retry": "إعادة المحاولة",
+    "cancel": "إلغاء",
+    "enterTokenManually": "أدخل Token يدوياً",
+    "enterTokenDesc": "أدخل الـ Gateway Token من إعدادات OpenClaw:",
+    "pasteToken": "الصق الـ Token هنا...",
+    "connect": "اتصل",
+    "tokenExplanation": "يحتاج AEGIS Desktop إلى token صالح للاتصال بـ OpenClaw Gateway. هذا الربط يتم مرة واحدة فقط."
+  },
+  "settingsExtra": {
+    "theme": "المظهر",
+    "connectionStatus": "حالة الاتصال",
+    "tokenPlaceholder": "اختياري — للمصادقة",
+    "saveReconnect": "حفظ وإعادة الاتصال",
+    "model": "النموذج",
+    "activeModel": "النموذج النشط",
+    "provider": "المزود",
+    "contextWindow": "نافذة السياق",
+    "modelNote": "يتغير من إعدادات Gateway",
+    "shortcuts": "اختصارات لوحة المفاتيح",
+    "navigatePages": "التنقل بين الصفحات",
+    "newTab": "Tab جديد",
+    "closeTab": "إغلاق Tab",
+    "nextTab": "Tab التالي",
+    "openSettings": "الإعدادات",
+    "refresh": "تحديث",
+    "closeModal": "إغلاق",
+    "context1mDesc": "تفعيل Anthropic 1M context beta لـ Opus / Sonnet — يزيد السياق لـ 1,000,000 token",
+    "toolIntentLabel": "🔧 Tool Intent View",
+    "toolIntentDesc": "عرض tool calls في الشات كـ cards مع الـ input/output — مخفية افتراضياً",
+    "copySystemInfo": "نسخ معلومات النظام"
+  },
+  "commandPaletteFooter": {
+    "noResults": "لا توجد نتائج",
+    "navigate": "تنقل",
+    "execute": "تنفيذ",
+    "close": "إغلاق"
+  },
+  "cronDetail": {
+    "active": "نشط",
+    "error": "خطأ",
+    "paused": "متوقف",
+    "isolated": "معزول",
+    "done": "✓ تم",
+    "runNow": "▶ تشغيل",
+    "running": "جاري التشغيل...",
+    "pause": "⏸ إيقاف",
+    "enable": "▶ تفعيل",
+    "activityLog": "سجل النشاط",
+    "showLess": "▲ عرض أقل",
+    "showMore": "▼ عرض المزيد ({{n}})",
+    "added": "✓ أُضيف",
+    "addError": "✗ خطأ",
+    "add": "+ إضافة",
+    "errorLabel": "✗ {{msg}}"
+  },
+  "cronTemplates": {
+    "morningName": "إحاطة الصباح",
+    "morningDesc": "طقس، أخبار، ومراجعة الذاكرة كل صباح",
+    "weeklyName": "ملخص أسبوعي",
+    "weeklyDesc": "ملخص نهاية الأسبوع وتنظيف الذاكرة",
+    "checkInName": "تواصل دوري",
+    "checkInDesc": "يتواصل معك كل فترة إذا في شي مهم",
+    "healthName": "صحة النظام",
+    "healthDesc": "مساحة التخزين، الرام، وفحص العمليات"
+  },
+  "dashboardExtra": {
+    "contextCompacted": "ضغط السياق ×{{n}}"
+  },
+  "memoryExplorer": {
+    "title": "مستكشف الذاكرة",
+    "noMemoriesGraph": "لا توجد ذكريات للعرض",
+    "noMemoriesTimeline": "لا توجد ذكريات بعد",
+    "noMemoriesCards": "لا توجد ذكريات",
+    "importance": "الأهمية",
+    "relatedMemories": "ذكريات مرتبطة",
+    "graphView": "🕸️ شبكة",
+    "timelineView": "📅 تسلسل",
+    "cardsView": "🗃️ بطاقات",
+    "catAll": "الكل",
+    "catTechnical": "تقني",
+    "catProjects": "مشاريع",
+    "catDecisions": "قرارات",
+    "catPeople": "أشخاص",
+    "catSkills": "مهارات",
+    "catPreferences": "تفضيلات",
+    "catEvents": "أحداث",
+    "catGeneral": "عام"
+  },
+  "agentHubExtra": {
+    "treeView": "🌳 شجرة",
+    "gridView": "▤ شبكة",
+    "agentsCount": "وكيل",
+    "workersCount": "عامل",
+    "runningCount": "شغال",
+    "totalCount": "إجمالي"
+  },
+  "workshopExtra": {
+    "queue": "قائمة الانتظار",
+    "inProgress": "قيد التنفيذ",
+    "done": "مكتمل",
+    "totalTasks": "إجمالي المهام",
+    "inQueue": "في الانتظار",
+    "completed": "مكتمل",
+    "active": "نشط"
+  },
+  "skillsExtra": {
+    "featured": "⭐ مميزة",
+    "installs": "تثبيت",
+    "requirements": "🔧 المتطلبات"
+  },
+  "settingsTheme": {
+    "dark": "🌙 الوضع الداكن",
+    "light": "☀️ الوضع الفاتح"
   }
 }

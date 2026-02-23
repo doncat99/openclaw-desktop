@@ -25,6 +25,7 @@ import { changeLanguage } from '@/i18n';
 // ═══════════════════════════════════════════════════════════
 
 export default function App() {
+  const { t } = useTranslation();
   const {
     addMessage,
     updateStreamingMessage,
@@ -54,7 +55,7 @@ export default function App() {
         const sessions = rawSessions.map((s: any) => {
           const key = s.key || s.sessionKey || 'unknown';
           let label = s.label || s.name || key;
-          if (key === 'agent:main:main') label = 'الجلسة الرئيسية';
+          if (key === 'agent:main:main') label = t('dashboard.mainSession');
           else if (key.startsWith('agent:main:')) label = key.split(':').pop() || key;
           return {
             key, label,
@@ -157,7 +158,7 @@ export default function App() {
         addMessage(msg);
         useNotificationStore.getState().addNotification({
           type: 'message',
-          title: 'رسالة جديدة',
+          title: t('notifications.newMessage'),
           body: msg.content.substring(0, 120),
         });
       },
@@ -169,7 +170,7 @@ export default function App() {
         loadTokenUsage();
         useNotificationStore.getState().addNotification({
           type: 'task_complete',
-          title: 'اكتمل الرد',
+          title: t('notifications.replyComplete'),
           body: content.substring(0, 120),
         });
       },
@@ -186,8 +187,8 @@ export default function App() {
           loadAvailableModels();
           useNotificationStore.getState().addNotification({
             type: 'connection',
-            title: 'متصل',
-            body: 'تم الاتصال بالـ Gateway بنجاح',
+            title: t('notifications.connected'),
+            body: t('notifications.connectedBody'),
           });
         }
       },
@@ -205,11 +206,6 @@ export default function App() {
     initConnection();
     notifications.requestPermission();
 
-    // Listen for model changes → refresh session metadata (maxTokens, contextTokens)
-    const handleModelChanged = () => loadTokenUsage();
-    window.addEventListener('aegis:model-changed', handleModelChanged);
-    return () => window.removeEventListener('aegis:model-changed', handleModelChanged);
-
     // Apply saved theme on startup
     const savedTheme = useSettingsStore.getState().theme;
     if (savedTheme === 'light') {
@@ -217,6 +213,16 @@ export default function App() {
     } else {
       document.documentElement.classList.remove('light');
     }
+
+    // Listen for model changes → refresh session metadata (maxTokens, contextTokens)
+    const handleModelChanged = () => loadTokenUsage();
+    window.addEventListener('aegis:model-changed', handleModelChanged);
+
+    // Cleanup — prevent orphan WebSocket connections on remount
+    return () => {
+      window.removeEventListener('aegis:model-changed', handleModelChanged);
+      gateway.disconnect();
+    };
   }, []);
 
   const initConnection = async () => {
@@ -274,8 +280,8 @@ export default function App() {
 
     useNotificationStore.getState().addNotification({
       type: 'connection',
-      title: 'تم الربط',
-      body: 'تم ربط AEGIS Desktop بالـ Gateway بنجاح',
+      title: t('notifications.paired'),
+      body: t('notifications.pairedBody'),
     });
   }, []);
 

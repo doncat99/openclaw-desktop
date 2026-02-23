@@ -247,7 +247,7 @@ export function DashboardPage() {
     });
     const totalCompactions = sessions.reduce((n: number, s: any) => n + (s.compactions || 0), 0);
     if (totalCompactions > 0) {
-      items.unshift({ color: themeHex('warning'), text: `Context compacted ×${totalCompactions}`, time: '—' });
+      items.unshift({ color: themeHex('warning'), text: t('dashboardExtra.contextCompacted', { n: totalCompactions }), time: '—' });
     }
     return items;
   }, [activeSessions, sessions]);

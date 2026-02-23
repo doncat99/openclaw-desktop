@@ -9,6 +9,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, Brain } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
@@ -21,6 +22,7 @@ interface ThinkingBubbleProps {
 }
 
 export function ThinkingBubble({ content, isStreaming = false }: ThinkingBubbleProps) {
+  const { t } = useTranslation();
   // Live mode: always expanded | Finalized: collapsed by default
   const [expanded, setExpanded] = useState(isStreaming);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -78,13 +80,13 @@ export function ThinkingBubble({ content, isStreaming = false }: ThinkingBubbleP
             'text-[11px] font-semibold tracking-wide',
             isStreaming ? 'text-aegis-accent/70' : 'text-aegis-text-dim',
           )}>
-            {isStreaming ? 'Thinking…' : 'Thought Process'}
+            {isStreaming ? t('thinking.thinking') : t('thinking.thoughtProcess')}
           </span>
 
           {/* Meta — line/char count when collapsed */}
           {!isStreaming && !expanded && (
             <span className="text-[9px] text-aegis-text-dim/50 font-mono">
-              {lineCount} lines · {charCount > 1000 ? `${(charCount / 1000).toFixed(1)}k` : charCount} chars
+              {lineCount} {t('thinking.lines')} · {charCount > 1000 ? `${(charCount / 1000).toFixed(1)}k` : charCount} {t('thinking.chars')}
             </span>
           )}
 

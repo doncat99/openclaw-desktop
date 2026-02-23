@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Copy, Check } from 'lucide-react';
@@ -42,6 +43,7 @@ function buildTheme(base: Record<string, any>) {
 }
 
 export function CodeBlock({ language, code }: CodeBlockProps) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -68,17 +70,17 @@ export function CodeBlock({ language, code }: CodeBlockProps) {
         <button
           onClick={handleCopy}
           className="flex items-center gap-1.5 text-[10px] text-aegis-text-muted hover:text-aegis-text-secondary transition-colors"
-          title="نسخ الكود"
+          title={t('code.copyCode')}
         >
           {copied ? (
             <>
               <Check size={11} className="text-emerald-400" />
-              <span className="text-emerald-400">تم</span>
+              <span className="text-emerald-400">{t('code.copied')}</span>
             </>
           ) : (
             <>
               <Copy size={11} />
-              <span className="opacity-0 group-hover:opacity-100 transition-opacity">نسخ</span>
+              <span className="opacity-0 group-hover:opacity-100 transition-opacity">{t('code.copy')}</span>
             </>
           )}
         </button>

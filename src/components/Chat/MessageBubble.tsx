@@ -222,7 +222,8 @@ export const MessageBubble = memo(function MessageBubble({ message, onResend }: 
     try {
       const d = new Date(message.timestamp);
       if (isNaN(d.getTime())) return '';
-      return d.toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
+      const locale = i18n.language?.startsWith('ar') ? 'ar-SA' : 'en-US';
+      return d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
     } catch {
       return '';
     }
@@ -285,7 +286,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onResend }: 
                   <ChatImage
                     key={i}
                     src={att.content}
-                    alt={att.fileName || 'مرفق'}
+                    alt={att.fileName || t('media.attachment')}
                     maxWidth="280px"
                     maxHeight="200px"
                   />

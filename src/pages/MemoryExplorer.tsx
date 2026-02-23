@@ -39,27 +39,27 @@ type ViewMode = 'graph' | 'timeline' | 'cards';
 // Constants
 // ═══════════════════════════════════════════════════════════
 
-/** Category config — colorIdx maps to dataColor() at render time */
-const CATEGORIES = [
-  { key: 'all',         label: 'All',         colorIdx: 1,  icon: '🧠' },
-  { key: 'technical',   label: 'Technical',   colorIdx: 9,  icon: '⚙️' },
-  { key: 'projects',    label: 'Projects',    colorIdx: 5,  icon: '📦' },
-  { key: 'decisions',   label: 'Decisions',   colorIdx: 2,  icon: '💡' },
-  { key: 'preferences', label: 'Preferences', colorIdx: 3,  icon: '💜' },
-  { key: 'people',      label: 'People',      colorIdx: 7,  icon: '👥' },
-  { key: 'skills',      label: 'Skills',      colorIdx: 6,  icon: '🎯' },
-  { key: 'events',      label: 'Events',      colorIdx: 2,  icon: '📅' },
-  { key: 'general',     label: 'General',     colorIdx: 9,  icon: '📝' },
+/** Category config — labels resolved via i18n at render time */
+const CATEGORY_KEYS = [
+  { key: 'all',         i18nKey: 'memoryExplorer.catAll',       colorIdx: 1,  icon: '🧠' },
+  { key: 'technical',   i18nKey: 'memoryExplorer.catTechnical', colorIdx: 9,  icon: '⚙️' },
+  { key: 'projects',    i18nKey: 'memoryExplorer.catProjects',  colorIdx: 5,  icon: '📦' },
+  { key: 'decisions',   i18nKey: 'memoryExplorer.catDecisions', colorIdx: 2,  icon: '💡' },
+  { key: 'preferences', i18nKey: 'memoryExplorer.catPreferences', colorIdx: 3, icon: '💜' },
+  { key: 'people',      i18nKey: 'memoryExplorer.catPeople',    colorIdx: 7,  icon: '👥' },
+  { key: 'skills',      i18nKey: 'memoryExplorer.catSkills',    colorIdx: 6,  icon: '🎯' },
+  { key: 'events',      i18nKey: 'memoryExplorer.catEvents',    colorIdx: 2,  icon: '📅' },
+  { key: 'general',     i18nKey: 'memoryExplorer.catGeneral',   colorIdx: 9,  icon: '📝' },
 ] as const;
 
 /** Called at render time — dataColor reads current theme */
 const getCatColor = (cat: string): string => {
-  const found = CATEGORIES.find(c => c.key === cat);
+  const found = CATEGORY_KEYS.find(c => c.key === cat);
   return found ? dataColor(found.colorIdx) : dataColor(9);
 };
 
 const getCatIcon = (cat: string): string =>
-  CATEGORIES.find(c => c.key === cat)?.icon || '📝';
+  CATEGORY_KEYS.find(c => c.key === cat)?.icon || '📝';
 
 // ═══════════════════════════════════════════════════════════
 // Helpers
@@ -170,14 +170,14 @@ function MemoryModal({ memory, onSave, onClose }: {
           <div>
             <label className="text-[11px] text-aegis-text-muted mb-1.5 block">Category</label>
             <div className="flex flex-wrap gap-1.5">
-              {CATEGORIES.filter(c => c.key !== 'all').map((c) => (
+              {CATEGORY_KEYS.filter(c => c.key !== 'all').map((c) => (
                 <button key={c.key} onClick={() => setCategory(c.key)}
                   className="text-[10px] px-2.5 py-1 rounded-full border transition-colors"
                   style={category === c.key
                     ? (() => { const clr = dataColor(c.colorIdx); return { background: `${clr}20`, borderColor: `${clr}40`, color: clr }; })()
                     : { borderColor: 'rgb(var(--aegis-overlay) / 0.08)', color: 'rgb(var(--aegis-text-dim))' }
                   }>
-                  {c.icon} {c.label}
+                  {c.icon} {t(c.i18nKey)}
                 </button>
               ))}
             </div>
@@ -222,7 +222,7 @@ function MemoryDisabledView() {
           <div className="w-16 h-16 rounded-2xl bg-aegis-primary/10 border border-aegis-primary/20 flex items-center justify-center mx-auto mb-5">
             <Brain size={28} className="text-aegis-primary" />
           </div>
-          <h2 className="text-[20px] font-bold text-aegis-text mb-3">Memory Explorer</h2>
+          <h2 className="text-[20px] font-bold text-aegis-text mb-3">{t('memoryExplorer.title')}</h2>
           <p className="text-[13px] text-aegis-text-dim/70 mb-6 leading-relaxed">
             {t('memory.experimentalDesc', 'Browse, search, and manage your agent\'s memories. Connect to a Memory API server or point to your local workspace folder containing .md files.')}
           </p>
@@ -283,7 +283,7 @@ function GraphView({ memories, onSelect }: { memories: Memory[]; onSelect: (m: M
   if (memories.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center text-aegis-text-dim text-[13px]">
-        🕸️ No memories to visualize
+        🕸️ {t('memoryExplorer.noMemoriesGraph')}
       </div>
     );
   }
@@ -408,7 +408,7 @@ function TimelineView({ memories, onSelect }: { memories: Memory[]; onSelect: (m
   if (memories.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center text-aegis-text-dim text-[13px]">
-        📅 No memories yet
+        📅 {t('memoryExplorer.noMemoriesTimeline')}
       </div>
     );
   }
@@ -479,7 +479,7 @@ function CardsView({ memories, onSelect }: { memories: Memory[]; onSelect: (m: M
   if (memories.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center text-aegis-text-dim text-[13px]">
-        🗃️ No memories found
+        🗃️ {t('memoryExplorer.noMemoriesCards')}
       </div>
     );
   }
@@ -605,7 +605,7 @@ function DetailPanel({ memory, onClose, onEdit, onDelete, apiUrl, isLocal }: {
               <h2 className="text-[20px] font-extrabold text-aegis-text mb-1">{extractTitle(memory)}</h2>
               <div className="text-[11px] mb-4">
                 <span className="font-bold" style={{ color }}>{memory.category}</span>
-                <span className="text-aegis-text-dim"> · importance {memory.importance || 5}/10</span>
+                <span className="text-aegis-text-dim"> · {t('memoryExplorer.importance')} {memory.importance || 5}/10</span>
               </div>
 
               {/* Actions */}
@@ -659,7 +659,7 @@ function DetailPanel({ memory, onClose, onEdit, onDelete, apiUrl, isLocal }: {
               {related.length > 0 && (
                 <>
                   <div className="border-t border-[rgb(var(--aegis-overlay)/0.06)] my-4" />
-                  <div className="text-[9px] uppercase tracking-[1.5px] font-bold text-aegis-text-dim mb-2">Related Memories</div>
+                  <div className="text-[9px] uppercase tracking-[1.5px] font-bold text-aegis-text-dim mb-2">{t('memoryExplorer.relatedMemories')}</div>
                   <div className="space-y-1">
                     {related.map(r => (
                       <div key={r.id} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-[rgb(var(--aegis-overlay)/0.04)] cursor-pointer transition-colors">
@@ -838,9 +838,9 @@ export function MemoryExplorerPage() {
 
         {/* Categories */}
         <div className="p-4 border-b border-[rgb(var(--aegis-overlay)/0.06)]">
-          <div className="text-[9px] uppercase tracking-[2px] font-bold text-aegis-text-dim mb-2.5">Categories</div>
+          <div className="text-[9px] uppercase tracking-[2px] font-bold text-aegis-text-dim mb-2.5">{t('memoryExplorer.catAll')}</div>
           <div className="space-y-0.5">
-            {CATEGORIES.map(cat => {
+            {CATEGORY_KEYS.map(cat => {
               const count = categoryCounts[cat.key] || 0;
               if (cat.key !== 'all' && count === 0) return null;
               const isActive = activeCategory === cat.key;
@@ -851,7 +851,7 @@ export function MemoryExplorerPage() {
                     isActive ? 'bg-aegis-accent/10 text-aegis-accent' : 'text-aegis-text-muted hover:bg-[rgb(var(--aegis-overlay)/0.04)]'
                   )}>
                   <div className="w-2 h-2 rounded-sm shrink-0" style={{ background: dataColor(cat.colorIdx) }} />
-                  <span className="flex-1">{cat.label}</span>
+                  <span className="flex-1">{t(cat.i18nKey)}</span>
                   <span className="text-[10px] font-bold bg-[rgb(var(--aegis-overlay)/0.04)] px-2 py-0.5 rounded-full text-aegis-text-dim">{count}</span>
                 </button>
               );
@@ -901,7 +901,7 @@ export function MemoryExplorerPage() {
         {/* Toolbar */}
         <div className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-[rgb(var(--aegis-overlay)/0.06)]">
           <div className="flex items-center gap-3">
-            <span className="text-[16px] font-bold text-aegis-text">🧠 Memory Explorer</span>
+            <span className="text-[16px] font-bold text-aegis-text">🧠 {t('memoryExplorer.title')}</span>
             {filtered.length > 0 && <span className="text-[11px] text-aegis-text-dim">{filtered.length} results</span>}
           </div>
           <div className="flex items-center gap-2">
@@ -918,9 +918,9 @@ export function MemoryExplorerPage() {
             {/* View Switcher */}
             <div className="flex gap-0.5 bg-[rgb(var(--aegis-overlay)/0.02)] border border-[rgb(var(--aegis-overlay)/0.06)] rounded-lg p-1 ms-2">
               {([
-                { key: 'graph' as const, label: '🕸️ Graph' },
-                { key: 'timeline' as const, label: '📅 Timeline' },
-                { key: 'cards' as const, label: '🗃️ Cards' },
+                { key: 'graph' as const, label: t('memoryExplorer.graphView') },
+                { key: 'timeline' as const, label: t('memoryExplorer.timelineView') },
+                { key: 'cards' as const, label: t('memoryExplorer.cardsView') },
               ]).map(v => (
                 <button key={v.key} onClick={() => setViewMode(v.key)}
                   className={clsx(

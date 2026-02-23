@@ -8,6 +8,7 @@ import {
   Settings, Bell, BellOff, Globe, Volume2, VolumeX,
   Wifi, WifiOff, Palette, Cpu, CheckCircle, Loader2, Keyboard, Copy
 } from 'lucide-react';
+import { APP_VERSION } from '@/hooks/useAppVersion';
 import { GlassCard } from '@/components/shared/GlassCard';
 import { PageTransition } from '@/components/shared/PageTransition';
 import { StatusDot } from '@/components/shared/StatusDot';
@@ -170,7 +171,7 @@ export function SettingsPageFull() {
       <GlassCard delay={0}>
         <h3 className="text-[14px] font-semibold text-aegis-text mb-4 flex items-center gap-2">
           <Palette size={16} className="text-aegis-primary" />
-          {t('settings.theme', 'المظهر')}
+          {t('settingsExtra.theme')}
         </h3>
         <div className="flex items-center gap-3">
           <button
@@ -182,7 +183,7 @@ export function SettingsPageFull() {
                 : 'border-aegis-border text-aegis-text-dim hover:border-aegis-border-hover'
             )}
           >
-            🌙 Dark Mode
+            {t('settingsTheme.dark')}
           </button>
           <button
             onClick={() => { setTheme('light'); document.documentElement.classList.add('light'); }}
@@ -193,7 +194,7 @@ export function SettingsPageFull() {
                 : 'border-aegis-border text-aegis-text-dim hover:border-aegis-border-hover'
             )}
           >
-            ☀️ Light Mode
+            {t('settingsTheme.light')}
           </button>
         </div>
       </GlassCard>
@@ -285,7 +286,7 @@ export function SettingsPageFull() {
         <div className="space-y-4">
           {/* Connection Status */}
           <div className="flex items-center justify-between">
-            <div className="text-[13px] text-aegis-text">{t('settings.connectionStatus', 'حالة الاتصال')}</div>
+            <div className="text-[13px] text-aegis-text">{t('settingsExtra.connectionStatus')}</div>
             <div className="flex items-center gap-2">
               <StatusDot status={connected ? 'active' : connecting ? 'idle' : 'error'} size={7} />
               <span className={clsx('text-[12px] font-medium',
@@ -313,7 +314,7 @@ export function SettingsPageFull() {
               dir="ltr"
             />
             <div className="text-[10px] text-aegis-text-dim mt-1">
-              {t('settings.gatewayUrlHint', 'اتركه فاضي لاستخدام الافتراضي (ws://127.0.0.1:18789)')}
+              {t('settings.gatewayUrlHint', 'Leave empty to use default (ws://127.0.0.1:18789)')}
             </div>
           </div>
 
@@ -326,7 +327,7 @@ export function SettingsPageFull() {
               type="password"
               value={editToken}
               onChange={(e) => { setEditToken(e.target.value); setConnectionDirty(true); }}
-              placeholder={t('settings.gatewayTokenPlaceholder', 'اختياري — للمصادقة')}
+              placeholder={t('settingsExtra.tokenPlaceholder')}
               className="w-full px-3 py-2.5 rounded-xl text-[13px] font-mono
                 bg-[rgb(var(--aegis-overlay)/0.03)] border border-aegis-border
                 text-aegis-text placeholder:text-aegis-text-dim
@@ -345,7 +346,7 @@ export function SettingsPageFull() {
                   hover:bg-aegis-primary/25 transition-colors"
               >
                 <CheckCircle size={13} />
-                {t('settings.saveReconnect', 'حفظ وإعادة الاتصال')}
+                {t('settingsExtra.saveReconnect')}
               </button>
             )}
             <button
@@ -354,7 +355,7 @@ export function SettingsPageFull() {
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12px] border border-aegis-border/20 text-aegis-text-dim hover:text-aegis-text hover:border-aegis-border/40 transition-colors disabled:opacity-40"
             >
               {testingConnection ? <Loader2 size={13} className="animate-spin" /> : <Wifi size={13} />}
-              {t('settings.testConnection', 'اختبار الاتصال')}
+              {t('settings.testConnection')}
             </button>
             {!connected && !connectionDirty && (
               <button
@@ -362,7 +363,7 @@ export function SettingsPageFull() {
                 className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12px] bg-aegis-primary/10 text-aegis-primary border border-aegis-primary/20 hover:bg-aegis-primary/20 transition-colors"
               >
                 <Wifi size={13} />
-                {t('connection.reconnect', 'إعادة الاتصال')}
+                {t('connection.reconnect')}
               </button>
             )}
             {testResult && (
@@ -381,31 +382,31 @@ export function SettingsPageFull() {
       <GlassCard delay={0.2}>
         <h3 className="text-[14px] font-semibold text-aegis-text mb-4 flex items-center gap-2">
           <Cpu size={16} className="text-aegis-accent" />
-          {t('settings.model', 'النموذج')}
+          {t('settingsExtra.model')}
         </h3>
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <div className="text-[13px] text-aegis-text">{t('settings.activeModel', 'النموذج النشط')}</div>
+            <div className="text-[13px] text-aegis-text">{t('settingsExtra.activeModel')}</div>
             <span className="text-[12px] font-mono text-aegis-primary font-medium">
               {mainModel.split('/').pop() || mainModel}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <div className="text-[13px] text-aegis-text">{t('settings.provider', 'المزود')}</div>
+            <div className="text-[13px] text-aegis-text">{t('settingsExtra.provider')}</div>
             <span className="text-[12px] font-mono text-aegis-text-dim">
               {mainModel.includes('/') ? mainModel.split('/')[0] : '—'}
             </span>
           </div>
           {contextTokens > 0 && (
             <div className="flex items-center justify-between">
-              <div className="text-[13px] text-aegis-text">{t('settings.contextWindow', 'نافذة السياق')}</div>
+              <div className="text-[13px] text-aegis-text">{t('settingsExtra.contextWindow')}</div>
               <span className="text-[12px] font-mono text-aegis-text-dim">
                 {contextTokens >= 1000000 ? `${(contextTokens / 1000000).toFixed(0)}M` : `${Math.round(contextTokens / 1000)}k`} tokens
               </span>
             </div>
           )}
           <p className="text-[10px] text-aegis-text-dim/60 mt-1">
-            {t('settings.modelNote', 'يتغير من إعدادات Gateway')}
+            {t('settingsExtra.modelNote')}
           </p>
         </div>
       </GlassCard>
@@ -414,18 +415,18 @@ export function SettingsPageFull() {
       <GlassCard delay={0.25}>
         <h3 className="text-[14px] font-semibold text-aegis-text mb-4 flex items-center gap-2">
           <Keyboard size={16} className="text-aegis-primary" />
-          {t('settings.shortcuts', 'اختصارات لوحة المفاتيح')}
+          {t('settingsExtra.shortcuts')}
         </h3>
         <div className="space-y-2.5">
           {[
             ['Ctrl+K', 'Command Palette'],
-            ['Ctrl+1-8', t('settings.navigatePages', 'التنقل بين الصفحات')],
-            ['Ctrl+N', t('settings.newTab', 'Tab جديد')],
-            ['Ctrl+W', t('settings.closeTab', 'إغلاق Tab')],
-            ['Ctrl+Tab', t('settings.nextTab', 'Tab التالي')],
-            ['Ctrl+,', t('settings.openSettings', 'الإعدادات')],
-            ['Ctrl+R', t('settings.refresh', 'تحديث')],
-            ['Escape', t('settings.closeModal', 'إغلاق')],
+            ['Ctrl+1-8', t('settingsExtra.navigatePages')],
+            ['Ctrl+N', t('settingsExtra.newTab')],
+            ['Ctrl+W', t('settingsExtra.closeTab')],
+            ['Ctrl+Tab', t('settingsExtra.nextTab')],
+            ['Ctrl+,', t('settingsExtra.openSettings')],
+            ['Ctrl+R', t('settingsExtra.refresh')],
+            ['Escape', t('settingsExtra.closeModal')],
           ].map(([key, desc]) => (
             <div key={key} className="flex items-center justify-between">
               <span className="text-[12px] text-aegis-text-muted">{desc}</span>
@@ -454,7 +455,7 @@ export function SettingsPageFull() {
               {context1mSaving && <Loader2 size={11} className="animate-spin text-aegis-text-dim" />}
             </div>
             <div className="text-[11px] text-aegis-text-dim/60 mt-0.5">
-              تفعيل Anthropic 1M context beta لـ Opus / Sonnet — يزيد السياق لـ 1,000,000 token
+              {t('settingsExtra.context1mDesc')}
             </div>
           </div>
           <Toggle
@@ -467,9 +468,9 @@ export function SettingsPageFull() {
         {/* Tool Intent View Toggle */}
         <div className="flex items-center justify-between py-3 border-b border-aegis-border/10">
           <div>
-            <div className="text-[13px] text-aegis-text font-medium">🔧 Tool Intent View</div>
+            <div className="text-[13px] text-aegis-text font-medium">{t('settingsExtra.toolIntentLabel')}</div>
             <div className="text-[11px] text-aegis-text-dim/60 mt-0.5">
-              عرض tool calls في الشات كـ cards مع الـ input/output — مخفية افتراضياً
+              {t('settingsExtra.toolIntentDesc')}
             </div>
           </div>
           <Toggle
@@ -572,7 +573,7 @@ export function SettingsPageFull() {
         <div className="text-center py-4 mb-4">
           <div className="text-3xl mb-2">🛡️</div>
           <div className="text-[14px] font-bold text-aegis-text">AEGIS Desktop</div>
-          <div className="text-[12px] text-aegis-text-dim mt-1">v5.3.0 — Mission Control</div>
+          <div className="text-[12px] text-aegis-text-dim mt-1">v{APP_VERSION} — Mission Control</div>
           <div className="text-[11px] text-aegis-text-dim mt-0.5">Advanced Executive General Intelligence System</div>
         </div>
         <div className="space-y-2 border-t border-aegis-border/15 pt-3">
@@ -593,7 +594,7 @@ export function SettingsPageFull() {
           navigator.clipboard?.writeText(info);
         }}
           className="mt-3 flex items-center gap-1.5 mx-auto px-3 py-1.5 rounded-lg text-[11px] text-aegis-text-dim hover:text-aegis-text border border-aegis-border/20 hover:border-aegis-border/40 transition-colors">
-          <Copy size={12} /> {t('settings.copySystemInfo', 'نسخ معلومات النظام')}
+          <Copy size={12} /> {t('settingsExtra.copySystemInfo')}
         </button>
       </GlassCard>
     </PageTransition>

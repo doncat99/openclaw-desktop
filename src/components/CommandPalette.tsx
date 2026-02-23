@@ -153,7 +153,7 @@ export function CommandPalette() {
           {/* Results */}
           <div className="max-h-[360px] overflow-y-auto py-1">
             {filtered.length === 0 && (
-              <div className="text-center py-8 text-[13px] text-aegis-text-dim">لا توجد نتائج</div>
+              <div className="text-center py-8 text-[13px] text-aegis-text-dim">{t('commandPaletteFooter.noResults')}</div>
             )}
             {filtered.slice(0, 12).map((cmd, i) => (
               <button
@@ -182,9 +182,9 @@ export function CommandPalette() {
 
           {/* Footer hint */}
           <div className="flex items-center gap-3 px-4 py-2 border-t border-aegis-border/15 text-[10px] text-aegis-text-dim/50">
-            <span>↑↓ تنقل</span>
-            <span>↵ تنفيذ</span>
-            <span>ESC إغلاق</span>
+            <span>↑↓ {t('commandPaletteFooter.navigate')}</span>
+            <span>↵ {t('commandPaletteFooter.execute')}</span>
+            <span>ESC {t('commandPaletteFooter.close')}</span>
           </div>
         </motion.div>
       </motion.div>

@@ -6,6 +6,40 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [5.3.1] — 2026-02-23
+
+### Fixed
+- **BREAKING: Device Auth v2** — removed v1 signature fallback; Gateway 2026.2.22+ rejects v1. If no challenge nonce arrives, handshake proceeds with token-only auth instead of sending an invalid v1 signature
+- **Hardcoded platform** — `'windows'` was sent to Gateway for all users; now auto-detected (`windows`/`macos`/`linux`) via `navigator.userAgent`
+- **Hardcoded locale** — `'ar-SA'` was sent to Gateway for all users; now follows the app's language setting
+- **Hardcoded Arabic strings** — 9 notification/label strings outside the i18n system now use translation keys, so English users see English text
+- **Date/time locale** — `toLocaleTimeString('ar-SA')` hardcoded in MessageBubble and TokenDashboard; now follows app language
+- **i18n fallback language** — changed from `'ar'` to `'en'` so missing translation keys fall back to English (the more complete locale)
+- **i18n initial language** — detects system language on first run instead of defaulting to Arabic
+- **Close code 1008** — WebSocket close with code 1008 now correctly detected as pairing-required, triggering the auto-pairing flow
+- **Unreachable theme code** — theme initialization in App.tsx was placed after an early `return` statement and never executed; moved before cleanup return
+- **Orphan WebSocket** — added `gateway.disconnect()` to useEffect cleanup, preventing duplicate connections on component remount
+
+### Added
+- **Cron delivery status** — Cron Monitor now shows separate run status and delivery status badges (Gateway 2026.2.22+ splits `lastRunStatus` from `lastDeliveryStatus`)
+- **Directive tag stripping** — client-side stripping of `[[reply_to_current]]`, `[[audio_as_voice]]`, and `<<<EXTERNAL_UNTRUSTED_CONTENT>>>` from assistant messages (defense-in-depth; Gateway 2026.2.22+ strips server-side)
+- **Challenge timeout** — increased from 750ms to 2s for more reliable v2 device-auth handshake on slow connections
+- **Centralized version** — `src/hooks/useAppVersion.ts` exports `APP_VERSION` + `useAppVersion()` hook; version defined once in `package.json`
+
+### Changed (i18n Audit)
+- **Full i18n audit** — ~100 hardcoded strings (Arabic + English) moved to locale files across 22 source files
+- **Locale keys: 278 → 431 (en), 224 → 398 (ar)** — 13 new sections: `format`, `notificationCenter`, `errors`, `code`, `media`, `thinking`, `pairing`, `settingsExtra`, `settingsTheme`, `cronDetail`, `cronTemplates`, `dashboardExtra`, `memoryExplorer`, `agentHubExtra`, `workshopExtra`, `skillsExtra`, `commandPaletteFooter`
+- **format.ts** — `timeAgo()` and `formatUptime()` now use i18n
+- **PairingScreen** — all `isRTL ? '...' : '...'` ternaries → `t()` calls
+- **CronMonitor** — templates use `getCronTemplates(t)` instead of inline `{en, ar}` objects; all buttons/labels i18n
+- **MemoryExplorer** — `CATEGORY_KEYS` with `i18nKey` pattern; all labels/empty states i18n
+- **Workshop** — columns, stats, legend labels through `t()`
+- **SkillsPage** — Featured, Installs, Requirements → `t()`
+- **ErrorBoundary** (both) — `i18n.t()` for class components
+- **NotificationCenter / TokenDashboard** — removed local `timeAgo()`, uses shared `format.ts`
+
+---
+
 ## [5.3.0] — 2026-02-22
 
 ### Added

@@ -5,6 +5,8 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bell, MessageCircle, CheckCircle, AlertTriangle, Wifi, Trash2, X } from 'lucide-react';
 import { useNotificationStore, NotificationType } from '@/stores/notificationStore';
+import { useTranslation } from 'react-i18next';
+import { timeAgo } from '@/utils/format';
 import clsx from 'clsx';
 
 const typeConfig: Record<NotificationType, { icon: any; color: string }> = {
@@ -14,15 +16,8 @@ const typeConfig: Record<NotificationType, { icon: any; color: string }> = {
   connection: { icon: Wifi, color: 'text-aegis-primary' },
 };
 
-function timeAgo(ts: string) {
-  const diff = Date.now() - new Date(ts).getTime();
-  if (diff < 60000) return 'الآن';
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}د`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}س`;
-  return `${Math.floor(diff / 86400000)}ي`;
-}
-
 export function NotificationCenter() {
+  const { t } = useTranslation();
   const { notifications, panelOpen, setPanelOpen, markAllRead, clearAll } = useNotificationStore();
 
   if (!panelOpen) return null;
@@ -48,11 +43,11 @@ export function NotificationCenter() {
           <div className="flex items-center justify-between px-4 py-3 border-b border-aegis-border/20">
             <div className="flex items-center gap-2">
               <Bell size={14} className="text-aegis-primary" />
-              <span className="text-[13px] font-semibold text-aegis-text">الإشعارات</span>
+              <span className="text-[13px] font-semibold text-aegis-text">{t('notificationCenter.title')}</span>
             </div>
             <div className="flex items-center gap-1">
               {notifications.length > 0 && (
-                <button onClick={clearAll} className="p-1 rounded-lg hover:bg-[rgb(var(--aegis-overlay)/0.05)] text-aegis-text-dim" title="مسح الكل">
+                <button onClick={clearAll} className="p-1 rounded-lg hover:bg-[rgb(var(--aegis-overlay)/0.05)] text-aegis-text-dim" title={t('notificationCenter.clearAll')}>
                   <Trash2 size={13} />
                 </button>
               )}
@@ -67,7 +62,7 @@ export function NotificationCenter() {
             {notifications.length === 0 ? (
               <div className="text-center py-12 text-[12px] text-aegis-text-dim/50">
                 <Bell size={28} className="mx-auto mb-2 opacity-20" />
-                لا توجد إشعارات
+                {t('notificationCenter.empty')}
               </div>
             ) : (
               notifications.map((n) => {
@@ -78,17 +73,12 @@ export function NotificationCenter() {
                     'flex items-start gap-3 px-4 py-3 border-b border-aegis-border/10 transition-colors',
                     !n.read && 'bg-aegis-primary/[0.03]'
                   )}>
-                    <Icon size={15} className={clsx('mt-0.5 shrink-0', cfg.color)} />
+                    <Icon size={14} className={clsx(cfg.color, 'mt-0.5 shrink-0')} />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={clsx('text-[12px] font-medium truncate', n.read ? 'text-aegis-text-muted' : 'text-aegis-text')}>
-                          {n.title}
-                        </span>
-                        <span className="text-[10px] text-aegis-text-dim/50 shrink-0">{timeAgo(n.timestamp)}</span>
-                      </div>
-                      <p className="text-[11px] text-aegis-text-dim mt-0.5 line-clamp-2">{n.body}</p>
+                      <div className="text-[12px] font-medium text-aegis-text truncate">{n.title}</div>
+                      {n.body && <div className="text-[11px] text-aegis-text-dim truncate mt-0.5">{n.body}</div>}
                     </div>
-                    {!n.read && <div className="w-1.5 h-1.5 rounded-full bg-aegis-primary mt-1.5 shrink-0" />}
+                    <span className="text-[9px] text-aegis-text-dim/40 shrink-0 mt-0.5">{timeAgo(n.timestamp)}</span>
                   </div>
                 );
               })

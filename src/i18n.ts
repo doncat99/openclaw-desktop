@@ -7,18 +7,15 @@ import en from './locales/en.json';
 // i18n — Internationalization (Arabic + English)
 // ═══════════════════════════════════════════════════════════
 
-// Detect language: localStorage > installer file > default 'ar'
+// Detect language: localStorage > system language > default 'en'
 const getInitialLang = (): string => {
   const stored = localStorage.getItem('aegis-language');
-  if (stored) return stored;
+  if (stored === 'ar' || stored === 'en') return stored;
 
-  // Try reading installer language choice (written during NSIS install)
-  try {
-    if (window.aegis?.app?.getPath) {
-      // Will be checked async in App — for now default to 'ar'
-    }
-  } catch { /* ignore */ }
-  return 'ar';
+  // Auto-detect from system/browser language
+  const sysLang = navigator.language || navigator.languages?.[0] || '';
+  if (sysLang.startsWith('ar')) return 'ar';
+  return 'en';
 };
 
 const savedLang = getInitialLang();
@@ -29,7 +26,7 @@ i18n.use(initReactI18next).init({
     en: { translation: en },
   },
   lng: savedLang,
-  fallbackLng: 'ar',
+  fallbackLng: 'en',
   interpolation: { escapeValue: false },
 });
 

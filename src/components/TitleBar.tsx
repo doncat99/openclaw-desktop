@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChatStore } from '@/stores/chatStore';
 import { gateway } from '@/services/gateway';
+import { APP_VERSION } from '@/hooks/useAppVersion';
 import { ChevronDown, Check } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -301,7 +302,7 @@ export function TitleBar() {
             AEGIS
           </span>
           <span className="text-[10px] text-aegis-text-dim tracking-[1px]">
-            DESKTOP <span className="opacity-50">v5.3</span>
+            DESKTOP <span className="opacity-50">v{APP_VERSION}</span>
           </span>
         </div>
 

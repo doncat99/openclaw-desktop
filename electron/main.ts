@@ -641,13 +641,26 @@ function setupIPC(): void {
     scopes: string[];
     token: string;
   }) => {
+    // v2 only — Gateway 2026.2.22+ rejects v1 signatures
+    // If no challenge nonce was received, return identity without signature
+    // so the handshake falls back to token-only auth
+    if (!params.nonce) {
+      const identity = getDeviceIdentity();
+      return {
+        deviceId: identity.deviceId,
+        publicKey: identity.publicKeyRawB64Url,
+        signature: null,
+        signedAt: null,
+        nonce: null,
+      };
+    }
+
     const identity = getDeviceIdentity();
     const signedAt = Date.now();
     const scopesStr = params.scopes.join(',');
-    const version = params.nonce ? 'v2' : 'v1';
 
     const parts = [
-      version,
+      'v2',
       identity.deviceId,
       params.clientId,
       params.clientMode,
@@ -655,8 +668,8 @@ function setupIPC(): void {
       scopesStr,
       String(signedAt),
       params.token || '',
+      params.nonce,
     ];
-    if (version === 'v2') parts.push(params.nonce || '');
 
     const payload = parts.join('|');
     const key = crypto.createPrivateKey(identity.privateKeyPem);

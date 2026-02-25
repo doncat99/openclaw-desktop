@@ -80,6 +80,16 @@ interface AegisAPI {
     onExit: (callback: (id: string, exitCode: number, signal?: number) => void) => () => void;
   };
   notify: (title: string, body: string) => Promise<void>;
+  update: {
+    check: () => Promise<any>;
+    download: () => Promise<any>;
+    install: () => Promise<void>;
+    onAvailable: (cb: (info: any) => void) => void;
+    onUpToDate: (cb: () => void) => void;
+    onProgress: (cb: (progress: any) => void) => void;
+    onDownloaded: (cb: () => void) => void;
+    onError: (cb: (msg: string) => void) => void;
+  };
 }
 
 declare global {

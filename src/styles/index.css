@@ -605,6 +605,27 @@
   100% { background-position: -200% 0; }
 }
 
+/* ═══ Agent Settings Slider ═══ */
+.aegis-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgb(var(--aegis-primary));
+  cursor: pointer;
+  border: 2px solid var(--aegis-bg-solid);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.2);
+}
+.aegis-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgb(var(--aegis-primary));
+  cursor: pointer;
+  border: 2px solid var(--aegis-bg-solid);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.2);
+}
+
 /* ═══ Mission Control (CronMonitor) ═══ */
 @keyframes mc-err-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 @keyframes mc-bar-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }

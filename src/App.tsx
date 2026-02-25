@@ -13,11 +13,11 @@ import { SkillsPage as SkillsPageFull } from '@/pages/SkillsPage';
 import { TerminalPage } from '@/pages/TerminalPage';
 import { SettingsPageFull } from '@/pages/SettingsPage';
 import { PairingScreen } from '@/components/PairingScreen';
+import { ToastContainer } from '@/components/Toast/ToastContainer';
 import { useChatStore } from '@/stores/chatStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { gateway } from '@/services/gateway';
 import { notifications } from '@/services/notifications';
-import { useNotificationStore } from '@/stores/notificationStore';
 import { changeLanguage } from '@/i18n';
 
 // ═══════════════════════════════════════════════════════════
@@ -150,17 +150,24 @@ export default function App() {
     console.warn('[Models] All strategies failed — using hardcoded fallback');
   }, [setAvailableModels]);
 
+  // ── Request notification permission (Web Notification API) ──
+  useEffect(() => { notifications.requestPermission(); }, []);
+
   // ── Gateway Setup ──
   useEffect(() => {
     gateway.setCallbacks({
       onMessage: (msg) => {
         setIsTyping(false);
         addMessage(msg);
-        useNotificationStore.getState().addNotification({
-          type: 'message',
-          title: t('notifications.newMessage'),
-          body: msg.content.substring(0, 120),
-        });
+        // Notify when app is minimized/background OR user is on a different page
+        const isOnChat = window.location.hash === '#/chat' || window.location.hash.startsWith('#/chat?');
+        if (!document.hasFocus() || !isOnChat) {
+          notifications.notify({
+            type: 'message',
+            title: t('notifications.newMessage'),
+            body: msg.content.substring(0, 120),
+          });
+        }
       },
       onStreamChunk: (messageId, content, media) => {
         updateStreamingMessage(messageId, content, media ? { mediaUrl: media.mediaUrl, mediaType: media.mediaType } : undefined);
@@ -168,11 +175,15 @@ export default function App() {
       onStreamEnd: (messageId, content, media) => {
         finalizeStreamingMessage(messageId, content, media ? { mediaUrl: media.mediaUrl, mediaType: media.mediaType } : undefined);
         loadTokenUsage();
-        useNotificationStore.getState().addNotification({
-          type: 'task_complete',
-          title: t('notifications.replyComplete'),
-          body: content.substring(0, 120),
-        });
+        // Notify (sound + toast) when app is minimized/background OR user is on a different page
+        const isOnChat = window.location.hash === '#/chat' || window.location.hash.startsWith('#/chat?');
+        if (!document.hasFocus() || !isOnChat) {
+          notifications.notify({
+            type: 'task_complete',
+            title: t('notifications.replyComplete'),
+            body: content.substring(0, 120),
+          });
+        }
       },
       onStatusChange: (status) => {
         setConnectionStatus(status);
@@ -185,11 +196,6 @@ export default function App() {
           loadSessions();
           loadTokenUsage();
           loadAvailableModels();
-          useNotificationStore.getState().addNotification({
-            type: 'connection',
-            title: t('notifications.connected'),
-            body: t('notifications.connectedBody'),
-          });
         }
       },
       onScopeError: (error) => {
@@ -204,7 +210,6 @@ export default function App() {
     });
 
     initConnection();
-    notifications.requestPermission();
 
     // Apply saved theme on startup
     const savedTheme = useSettingsStore.getState().theme;
@@ -277,12 +282,6 @@ export default function App() {
     gateway.reconnectWithToken(token);
     setNeedsPairing(false);
     pairingTriggeredRef.current = false;
-
-    useNotificationStore.getState().addNotification({
-      type: 'connection',
-      title: t('notifications.paired'),
-      body: t('notifications.pairedBody'),
-    });
   }, []);
 
   const handlePairingCancel = useCallback(() => {
@@ -306,6 +305,8 @@ export default function App() {
       )}
 
       <HashRouter>
+        {/* In-app toast notifications — always visible, above all routes */}
+        <ToastContainer />
         <Routes>
           <Route element={<AppLayout />}>
             <Route path="/" element={<DashboardPage />} />

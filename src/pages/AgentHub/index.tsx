@@ -6,7 +6,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Loader2, RotateCcw, ChevronDown, Zap, AlertCircle, Bot, Search, Code2, Brain, Plus, Pencil, Trash2, Save } from 'lucide-react';
+import { Loader2, RotateCcw, ChevronDown, Zap, AlertCircle, Bot, Search, Code2, Brain, Plus, Trash2, Settings2 } from 'lucide-react';
+import { AgentSettingsPanel } from './AgentSettingsPanel';
 import { GlassCard } from '@/components/shared/GlassCard';
 import { PageTransition } from '@/components/shared/PageTransition';
 import { ProgressRing } from '@/components/shared/ProgressRing';
@@ -142,12 +143,14 @@ function parseSessions(raw: any[]): SessionInfo[] {
 // Tree View — SVG connections + animated dots
 // ═══════════════════════════════════════════════════════════
 
-function TreeView({ mainSession, registeredAgents, workers, agents }: {
+function TreeView({ mainSession, registeredAgents, workers, agents, onAgentClick }: {
   mainSession: SessionInfo | undefined;
   registeredAgents: AgentInfo[];
   workers: SessionInfo[];
   agents: AgentInfo[];
+  onAgentClick?: (agent: AgentInfo) => void;
 }) {
+  const runningSubAgents = useGatewayDataStore((s) => s.runningSubAgents);
   const agentCount = registeredAgents.length;
   const mainName = agents.find(a => a.id === 'main')?.name || 'Main Agent';
 
@@ -293,6 +296,8 @@ function TreeView({ mainSession, registeredAgents, workers, agents }: {
               const agentSessions = workers.filter(w => w.agentId === agent.id);
               const activeSessions = agentSessions.filter(s => s.running);
               const totalTok = agentSessions.reduce((s, sess) => s + sess.totalTokens, 0);
+              const spawned = runningSubAgents.some(sa => sa.agentId === agent.id);
+              const isRunning = activeSessions.length > 0 || spawned;
 
               return (
                 <div key={agent.id} className="relative">
@@ -303,25 +308,30 @@ function TreeView({ mainSession, registeredAgents, workers, agents }: {
                       {childCount}
                     </div>
                   )}
-                  <div className="relative rounded-2xl border px-5 py-3.5 min-w-[200px] max-w-[240px] overflow-hidden transition-all hover:-translate-y-0.5 cursor-default"
-                    style={{ background: `linear-gradient(135deg, ${cfg.color}10, ${cfg.color}04)`, borderColor: `${cfg.color}30` }}>
+                  <div className={clsx(
+                    "relative rounded-2xl border px-5 py-3.5 min-w-[200px] max-w-[240px] overflow-hidden transition-all hover:-translate-y-0.5 cursor-pointer",
+                    isRunning && "ring-1 ring-aegis-primary/30"
+                  )}
+                    onClick={() => onAgentClick?.(agent)}
+                    style={{ background: `linear-gradient(135deg, ${cfg.color}10, ${cfg.color}04)`, borderColor: isRunning ? `${cfg.color}50` : `${cfg.color}30` }}>
                     <div className="absolute top-0 inset-x-0 h-[2px] opacity-40"
                       style={{ background: `linear-gradient(90deg, transparent, ${cfg.color}, transparent)` }} />
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-[10px] flex items-center justify-center text-[18px] border"
+                      <div className="w-10 h-10 rounded-[10px] flex items-center justify-center text-[18px] border relative"
                         style={{ background: `linear-gradient(135deg, ${cfg.color}15, ${cfg.color}03)`, borderColor: `${cfg.color}20` }}>
                         {cfg.icon}
+                        {isRunning && <div className="absolute -bottom-[2px] -end-[2px]"><StatusDot status="active" size={8} glow beacon /></div>}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="text-[13px] font-bold" style={{ color: cfg.color }}>{agent.name || agent.id}</div>
                         <div className="text-[9px] text-aegis-text-dim font-mono">
-                          {agentSessions[0]?.model.split('/').pop() || '—'}
+                          {(agent.model || agentSessions[0]?.model || '—').toString().split('/').pop()}
                         </div>
                         <div className="flex items-center gap-1.5 mt-1">
-                          {activeSessions.length > 0 ? (
+                          {isRunning ? (
                             <span className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded font-bold"
                               style={{ background: `${cfg.color}12`, color: cfg.color }}>
-                              <StatusDot status="active" size={6} glow /> Running
+                              <Loader2 size={9} className="animate-spin" /> Running
                             </span>
                           ) : (
                             <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgb(var(--aegis-overlay)/0.04)] text-aegis-text-dim font-bold">Idle</span>
@@ -505,6 +515,7 @@ export function AgentHubPage() {
   const { connected } = useChatStore();
   const rawSessions = useGatewayDataStore((s) => s.sessions);
   const agents = useGatewayDataStore((s) => s.agents) as AgentInfo[];
+  const runningSubAgents = useGatewayDataStore((s) => s.runningSubAgents);
   const loading = useGatewayDataStore((s) => s.loading.sessions || s.loading.agents);
 
   const sessions = useMemo(() => parseSessions(rawSessions as any[]), [rawSessions]);
@@ -514,22 +525,44 @@ export function AgentHubPage() {
   const [workerLogs, setWorkerLogs] = useState<Record<string, any[]>>({});
   const [loadingLog, setLoadingLog] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [deletingAgentId, setDeletingAgentId] = useState<string | null>(null);
   const [newAgent, setNewAgent] = useState({ id: '', name: '', model: '', workspace: '' });
-  const [editPatch, setEditPatch] = useState<{ model?: string; workspace?: string }>({});
+  const [settingsAgent, setSettingsAgent] = useState<AgentInfo | null>(null);
+
+  // ── Stable model map from config.get (agents.list never returns models) ──
+  // Stored in local state so polling refreshes of agents.list can't overwrite it.
+  const [agentModels, setAgentModels] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!connected) return;
+    gateway.call('config.get', {}).then((snap: any) => {
+      const cfgList: any[] = snap?.config?.agents?.list ?? [];
+      const models: Record<string, string> = {};
+      for (const cfg of cfgList) {
+        if (!cfg?.id) continue;
+        const raw = cfg.model;
+        const m = typeof raw === 'string'
+          ? raw
+          : (raw && typeof raw === 'object' && 'primary' in raw)
+            ? String(raw.primary ?? '')
+            : '';
+        if (m) models[cfg.id] = m;
+      }
+      setAgentModels(models);
+    }).catch(() => { /* silent — cards just show '—' */ });
+  }, [connected]);
+
+  // Enrich agents with model data from config (merge at render time, not in store)
+  const enrichedAgents = useMemo(() =>
+    agents.map(a => agentModels[a.id] ? { ...a, model: agentModels[a.id] } : a),
+    [agents, agentModels]
+  );
 
   const handleCreateAgent = async () => {
     if (!newAgent.id.trim()) return;
     try {
       await gateway.createAgent(newAgent);
       setShowAddForm(false); setNewAgent({ id: '', name: '', model: '', workspace: '' });
-      await refreshGroup('agents');
-    } catch (err: any) { alert(`Failed: ${err?.message || err}`); }
-  };
-
-  const handleUpdateAgent = async (agentId: string) => {
-    try { await gateway.updateAgent(agentId, editPatch); setEditingAgentId(null); setEditPatch({});
       await refreshGroup('agents');
     } catch (err: any) { alert(`Failed: ${err?.message || err}`); }
   };
@@ -548,8 +581,12 @@ export function AgentHubPage() {
   // ── Derived data ──
   const mainSession = sessions.find(s => s.agentId === 'main' && s.type === 'main');
   const workers = sessions.filter(s => s !== mainSession && (s.type === 'cron' || s.type === 'subagent'));
-  const registeredAgents = agents.filter(a => a.id !== 'main');
+  const registeredAgents = enrichedAgents.filter(a => a.id !== 'main');
   const getAgentSessions = (agentId: string) => sessions.filter(s => s.agentId === agentId && s.type !== 'main');
+
+  // Check if an agent has a running sub-agent (from real-time tool stream tracking)
+  const isAgentSpawned = (agentId: string) => runningSubAgents.some(sa => sa.agentId === agentId);
+  const getSpawnedLabel = (agentId: string) => runningSubAgents.find(sa => sa.agentId === agentId)?.label || '';
 
   // ── Expand worker → load history ──
   const handleWorkerClick = async (sessionKey: string) => {
@@ -694,7 +731,7 @@ export function AgentHubPage() {
           {/* TREE VIEW                                     */}
           {/* ══════════════════════════════════════════════ */}
           {viewMode === 'tree' && (
-            <TreeView mainSession={mainSession} registeredAgents={registeredAgents} workers={workers} agents={agents} />
+            <TreeView mainSession={mainSession} registeredAgents={registeredAgents} workers={workers} agents={enrichedAgents} onAgentClick={(a) => setSettingsAgent(a)} />
           )}
 
           {/* ══════════════════════════════════════════════ */}
@@ -703,7 +740,7 @@ export function AgentHubPage() {
           {viewMode === 'activity' && (
             <GlassCard delay={0}>
               <div className="text-[10px] text-aegis-text-dim uppercase tracking-widest font-bold mb-2 px-3 pt-2">Live Activity Feed</div>
-              <ActivityFeed sessions={sessions} agents={agents} />
+              <ActivityFeed sessions={sessions} agents={enrichedAgents} />
             </GlassCard>
           )}
 
@@ -724,7 +761,7 @@ export function AgentHubPage() {
                         <div className="absolute -bottom-[3px] -right-[3px]"><StatusDot status="active" size={14} glow beacon={mainSession.running} /></div>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-[18px] font-extrabold text-aegis-text">{agents.find(a => a.id === 'main')?.name || 'Main Agent'}</div>
+                        <div className="text-[18px] font-extrabold text-aegis-text">{enrichedAgents.find(a => a.id === 'main')?.name || 'Main Agent'}</div>
                         <div className="text-[11px] text-aegis-text-muted font-mono mt-0.5">{mainSession.model.split('/').pop() || '—'}</div>
                         <div className="text-[10px] text-aegis-text-dim mt-1">{t('agents.lastActive', 'Last active')}: {timeAgo(mainSession.updatedAt)}</div>
                       </div>
@@ -747,7 +784,7 @@ export function AgentHubPage() {
                         style={{ background: `linear-gradient(135deg, ${mainColor()}10, ${mainColor()}04)`, borderColor: `${mainColor()}15`, color: `${mainColor()}50` }}>
                         🛡️<div className="absolute -bottom-[3px] -right-[3px]"><StatusDot status="sleeping" size={14} /></div>
                       </div>
-                      <div className="flex-1"><div className="text-[18px] font-extrabold text-aegis-text-muted">{agents.find(a => a.id === 'main')?.name || 'Main Agent'}</div><div className="text-[11px] text-aegis-text-dim mt-0.5">{t('agents.notConnected', 'Not connected')}</div></div>
+                      <div className="flex-1"><div className="text-[18px] font-extrabold text-aegis-text-muted">{enrichedAgents.find(a => a.id === 'main')?.name || 'Main Agent'}</div><div className="text-[11px] text-aegis-text-dim mt-0.5">{t('agents.notConnected', 'Not connected')}</div></div>
                       <div className="px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border bg-[rgb(var(--aegis-overlay)/0.04)] text-aegis-text-muted border-[rgb(var(--aegis-overlay)/0.08)]">OFFLINE</div>
                     </div>
                   </GlassCard>
@@ -797,34 +834,54 @@ export function AgentHubPage() {
                       const activeSessions = agentSessions.filter(s => s.running);
                       const totalTokens = agentSessions.reduce((sum, s) => sum + s.totalTokens, 0);
                       const lastActive = agentSessions.length > 0 ? Math.max(...agentSessions.map(s => s.updatedAt)) : 0;
+                      const spawned = isAgentSpawned(agent.id);
+                      const spawnedLabel = getSpawnedLabel(agent.id);
+                      const isRunning = activeSessions.length > 0 || spawned;
 
                       return (
                         <div key={agent.id}>
-                          <GlassCard delay={i * 0.05} hover>
+                          <GlassCard delay={i * 0.05} hover shimmer={isRunning}>
                             <div className="flex items-start gap-4">
                               <div className="w-[48px] h-[48px] rounded-xl flex items-center justify-center shrink-0 border relative"
-                                style={{ background: `linear-gradient(135deg, ${display.color}20, ${display.color}05)`, borderColor: `${display.color}25`, color: display.color }}>
+                                style={{ background: `linear-gradient(135deg, ${display.color}20, ${display.color}05)`, borderColor: isRunning ? `${display.color}40` : `${display.color}25`, color: display.color }}>
                                 {display.icon}
-                                {activeSessions.length > 0 && <div className="absolute -bottom-[2px] -right-[2px]"><StatusDot status="active" size={10} glow beacon /></div>}
+                                {isRunning && <div className="absolute -bottom-[2px] -right-[2px]"><StatusDot status="active" size={10} glow beacon /></div>}
                               </div>
                               <div className="flex-1 min-w-0">
                                 <div className="text-[14px] font-bold text-aegis-text">{agent.name || agent.id}</div>
-                                <div className="text-[10px] text-aegis-text-muted mt-0.5">{display.description}</div>
+                                <div className="text-[10px] text-aegis-text-dim font-mono mt-0.5">
+                                  {(agent.model || '').toString().split('/').pop() || display.description}
+                                </div>
                                 <div className="flex items-center gap-3 mt-2 text-[10px] text-aegis-text-muted">
-                                  {activeSessions.length > 0 ? (
-                                    <span className="flex items-center gap-1 text-aegis-primary"><Loader2 size={9} className="animate-spin" /> {activeSessions.length} running</span>
+                                  {isRunning ? (
+                                    <span className="flex items-center gap-1 text-aegis-primary">
+                                      <Loader2 size={9} className="animate-spin" />
+                                      {activeSessions.length > 0 ? `${activeSessions.length} running` : 'Working…'}
+                                    </span>
                                   ) : <span className="text-aegis-text-dim">Idle</span>}
                                   {totalTokens > 0 && <><span className="text-aegis-text-dim">·</span><span>{formatTokens(totalTokens)} tokens</span></>}
                                   {lastActive > 0 && <><span className="text-aegis-text-dim">·</span><span>{timeAgo(lastActive)}</span></>}
                                 </div>
+                                {/* Task label when spawned */}
+                                {spawned && spawnedLabel && (
+                                  <div className="mt-1.5 text-[9px] text-aegis-primary/70 truncate max-w-[200px]" title={spawnedLabel}>
+                                    📋 {spawnedLabel}
+                                  </div>
+                                )}
                               </div>
-                              <div className="px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider border shrink-0"
-                                style={{ background: agent.configured ? `${display.color}10` : 'rgb(var(--aegis-overlay) / 0.03)', color: agent.configured ? display.color : 'rgb(var(--aegis-overlay) / 0.2)', borderColor: agent.configured ? `${display.color}20` : 'rgb(var(--aegis-overlay) / 0.06)' }}>
-                                {agent.configured ? 'READY' : 'SETUP'}
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <div className="px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider border"
+                                  style={{
+                                    background: isRunning ? themeAlpha('primary', 0.12) : agent.configured ? `${display.color}10` : 'rgb(var(--aegis-overlay) / 0.03)',
+                                    color: isRunning ? themeHex('primary') : agent.configured ? display.color : 'rgb(var(--aegis-overlay) / 0.2)',
+                                    borderColor: isRunning ? themeAlpha('primary', 0.25) : agent.configured ? `${display.color}20` : 'rgb(var(--aegis-overlay) / 0.06)',
+                                  }}>
+                                  {isRunning ? 'ACTIVE' : agent.configured ? 'READY' : 'SETUP'}
+                                </div>
                               </div>
                               <div className="flex items-center gap-1 shrink-0">
-                                <button onClick={(e) => { e.stopPropagation(); const o = editingAgentId !== agent.id; setEditingAgentId(o ? agent.id : null); setEditPatch(o ? {} : {}); }}
-                                  className="p-1.5 rounded-lg bg-[rgb(var(--aegis-overlay)/0.04)] border border-[rgb(var(--aegis-overlay)/0.08)] text-aegis-text-muted hover:text-aegis-primary hover:border-aegis-primary/30 transition-colors"><Pencil size={13} /></button>
+                                <button onClick={(e) => { e.stopPropagation(); setSettingsAgent(agent); }}
+                                  className="p-1.5 rounded-lg bg-[rgb(var(--aegis-overlay)/0.04)] border border-[rgb(var(--aegis-overlay)/0.08)] text-aegis-text-muted hover:text-aegis-primary hover:border-aegis-primary/30 transition-colors"><Settings2 size={13} /></button>
                                 <button onClick={(e) => { e.stopPropagation(); handleDeleteAgent(agent.id); }}
                                   className={clsx('p-1.5 rounded-lg transition-colors', deletingAgentId === agent.id ? 'text-red-400 bg-red-500/10 border border-red-400/30' : 'text-aegis-text-muted hover:text-red-400 bg-[rgb(var(--aegis-overlay)/0.04)] border border-[rgb(var(--aegis-overlay)/0.08)]')}>
                                   {deletingAgentId === agent.id ? <span className="text-[10px] font-bold">Confirm?</span> : <Trash2 size={13} />}
@@ -832,20 +889,6 @@ export function AgentHubPage() {
                               </div>
                             </div>
                           </GlassCard>
-                          <AnimatePresence>
-                            {editingAgentId === agent.id && (
-                              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                                <div className="mt-1 p-3 rounded-xl border bg-[rgb(var(--aegis-overlay)/0.02)] border-[rgb(var(--aegis-overlay)/0.06)] space-y-2">
-                                  <input placeholder="Model" defaultValue={agent.model || ''} onChange={e => setEditPatch(p => ({ ...p, model: e.target.value }))} className="w-full bg-[rgb(var(--aegis-overlay)/0.05)] border border-[rgb(var(--aegis-overlay)/0.1)] rounded-lg px-3 py-1.5 text-xs text-aegis-text placeholder:text-aegis-text-dim focus:border-aegis-primary/50 focus:outline-none" />
-                                  <input placeholder="Workspace" defaultValue={agent.workspace || ''} onChange={e => setEditPatch(p => ({ ...p, workspace: e.target.value }))} className="w-full bg-[rgb(var(--aegis-overlay)/0.05)] border border-[rgb(var(--aegis-overlay)/0.1)] rounded-lg px-3 py-1.5 text-xs text-aegis-text placeholder:text-aegis-text-dim focus:border-aegis-primary/50 focus:outline-none" />
-                                  <div className="flex gap-2 justify-end">
-                                    <button onClick={() => setEditingAgentId(null)} className="px-3 py-1 rounded-lg text-[10px] text-aegis-text-muted hover:text-aegis-text-secondary">Cancel</button>
-                                    <button onClick={() => handleUpdateAgent(agent.id)} className="px-3 py-1 rounded-lg bg-aegis-primary/20 border border-aegis-primary/30 text-aegis-primary text-[10px] font-semibold"><Save size={10} className="inline me-1" />Save</button>
-                                  </div>
-                                </div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
                         </div>
                       );
                     })}
@@ -875,6 +918,18 @@ export function AgentHubPage() {
           )}
         </>
       )}
+
+      {/* ══ Agent Settings Panel ══ */}
+      <AgentSettingsPanel
+        agent={settingsAgent}
+        agentSessions={
+          settingsAgent
+            ? sessions.filter(s => s.agentId === settingsAgent.id && s.type !== 'main')
+            : []
+        }
+        onClose={() => setSettingsAgent(null)}
+        onSaved={() => refreshGroup('agents')}
+      />
     </PageTransition>
   );
 }

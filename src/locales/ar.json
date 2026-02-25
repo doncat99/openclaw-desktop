@@ -24,7 +24,8 @@
     "memory": "الذاكرة",
     "skills": "المهارات",
     "settings": "الإعدادات",
-    "terminal": "الطرفية"
+    "terminal": "الطرفية",
+    "notifications": "الإشعارات"
   },
   "skills": {
     "title": "المهارات",
@@ -458,6 +459,32 @@
     "workersCount": "عامل",
     "runningCount": "شغال",
     "totalCount": "إجمالي"
+  },
+  "agentSettings": {
+    "model": "الموديل",
+    "selectModel": "اختر موديل...",
+    "noModels": "لا يوجد موديلات",
+    "parameters": "الإعدادات",
+    "cacheRetention": "تخزين الكاش",
+    "cacheLong": "طويل",
+    "cacheShort": "قصير",
+    "cacheNone": "بدون",
+    "cacheLongDesc": "~ساعة",
+    "cacheShortDesc": "~٥ دقايق",
+    "cacheNoneDesc": "بدون كاش",
+    "temperature": "الحرارة",
+    "precise": "دقيق",
+    "creative": "إبداعي",
+    "maxTokens": "الحد الأقصى للتوكنز",
+    "maxTokensPlaceholder": "افتراضي (حد الموديل)",
+    "context1m": "سياق ١ مليون",
+    "context1mDesc": "سياق Anthropic الموسّع (تجريبي)",
+    "stats": "إحصائيات الجلسات",
+    "activeSessions": "نشط",
+    "totalTokens": "توكنز",
+    "saving": "جاري الحفظ...",
+    "saved": "تم الحفظ!",
+    "saveFailed": "فشل الحفظ"
   },
   "workshopExtra": {
     "queue": "قائمة الانتظار",

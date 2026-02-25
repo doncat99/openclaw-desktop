@@ -269,7 +269,7 @@ export function SettingsPageFull() {
           </div>
 
           <button
-            onClick={() => notifications.notify({ title: 'AEGIS', body: t('settings.testNotification') })}
+            onClick={() => notifications.notify({ type: 'info', title: 'AEGIS', body: t('settings.testNotification') })}
             className="text-[12px] px-4 py-2 rounded-xl border border-aegis-border/20 text-aegis-text-dim hover:text-aegis-text hover:border-aegis-border/40 transition-colors"
           >
             🔔 {t('settings.testSound')}

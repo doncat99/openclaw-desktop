@@ -24,7 +24,8 @@
     "memory": "Memory",
     "skills": "Skills",
     "settings": "Settings",
-    "terminal": "Terminal"
+    "terminal": "Terminal",
+    "notifications": "Notifications"
   },
   "skills": {
     "title": "Skills",
@@ -491,6 +492,32 @@
     "workersCount": "workers",
     "runningCount": "running",
     "totalCount": "total"
+  },
+  "agentSettings": {
+    "model": "Model",
+    "selectModel": "Select a model...",
+    "noModels": "No models available",
+    "parameters": "Parameters",
+    "cacheRetention": "Cache Retention",
+    "cacheLong": "Long",
+    "cacheShort": "Short",
+    "cacheNone": "None",
+    "cacheLongDesc": "~1 hour",
+    "cacheShortDesc": "~5 min",
+    "cacheNoneDesc": "No caching",
+    "temperature": "Temperature",
+    "precise": "Precise",
+    "creative": "Creative",
+    "maxTokens": "Max Tokens",
+    "maxTokensPlaceholder": "Default (model limit)",
+    "context1m": "1M Context",
+    "context1mDesc": "Anthropic extended context (beta)",
+    "stats": "Session Stats",
+    "activeSessions": "Active",
+    "totalTokens": "Tokens",
+    "saving": "Saving...",
+    "saved": "Saved!",
+    "saveFailed": "Failed to save"
   },
   "workshopExtra": {
     "queue": "Queue",

@@ -92,6 +92,18 @@ export interface CronJob {
   [k: string]: any;
 }
 
+// ── Running Sub-Agent Tracking ───────────────────────────
+// Detected from sessions polling (every 10s).
+// Gateway WebSocket does NOT send stream:"tool" events,
+// so we scan sessions.list for key "agent:<id>:subagent:<uuid>" + running=true.
+
+export interface RunningSubAgent {
+  agentId: string;
+  startTime: number;
+  label?: string;
+  sessionKey?: string;
+}
+
 // ── Store State ──────────────────────────────────────────
 
 interface GatewayDataState {
@@ -101,6 +113,7 @@ interface GatewayDataState {
   costSummary: CostSummary | null;
   sessionsUsage: SessionsUsage | null;
   cronJobs: CronJob[];
+  runningSubAgents: RunningSubAgent[];
 
   // Timestamps (ms) — when each group was last fetched
   lastFetch: {
@@ -144,6 +157,9 @@ interface GatewayDataState {
   setLoading: (group: keyof GatewayDataState['loading'], val: boolean) => void;
   setError: (group: keyof GatewayDataState['errors'], err: string | null) => void;
 
+  // Sub-agent tracking (synced from sessions polling)
+  setRunningSubAgents: (list: RunningSubAgent[]) => void;
+
   // Mark polling active/inactive
   setPolling: (active: boolean) => void;
 
@@ -160,6 +176,7 @@ export const useGatewayDataStore = create<GatewayDataState>((set, get) => ({
   costSummary: null,
   sessionsUsage: null,
   cronJobs: [],
+  runningSubAgents: [],
 
   // Timestamps
   lastFetch: { sessions: 0, agents: 0, cost: 0, usage: 0, cron: 0 },
@@ -219,6 +236,10 @@ export const useGatewayDataStore = create<GatewayDataState>((set, get) => ({
 
   setError: (group, err) =>
     set({ errors: { ...get().errors, [group]: err } }),
+
+  // ── Sub-agent tracking ──
+
+  setRunningSubAgents: (list) => set({ runningSubAgents: list }),
 
   setPolling: (active) => set({ polling: active }),
 
@@ -316,6 +337,8 @@ async function fetchCron() {
 
 async function tickFast() {
   await fetchSessions();
+  // Detect running sub-agents from sessions data
+  syncRunningSubAgents();
 }
 
 async function tickMid() {
@@ -409,6 +432,68 @@ export async function fetchFullUsage(limit = 2000): Promise<SessionsUsage | null
   } catch {
     return null;
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Sub-Agent Detection — polling-based
+// Gateway WebSocket does NOT emit stream:"tool" events,
+// so we detect running sub-agents from sessions.list data.
+// ═══════════════════════════════════════════════════════════
+
+const SUB_AGENT_RE = /^agent:([^:]+):subagent:/;
+
+/**
+ * Sync runningSubAgents from sessions data.
+ * Called every 10s in tickFast() after fetchSessions().
+ * Sessions with key "agent:<id>:subagent:<uuid>" that appear in sessions.list
+ * are running — completed sub-agent sessions are removed from the list automatically.
+ * Note: sessions.list does NOT return a "running" field, so presence = active.
+ */
+function syncRunningSubAgents() {
+  const store = useGatewayDataStore.getState();
+  const sessions = store.sessions;
+  const prev = store.runningSubAgents;
+
+  // Any sub-agent session in sessions.list is active (completed ones get removed)
+  const running: RunningSubAgent[] = [];
+  for (const s of sessions) {
+    const match = s.key?.match(SUB_AGENT_RE);
+    if (!match) continue;
+
+    const agentId = match[1];
+    // Preserve startTime for already-tracked entries
+    const existing = prev.find((r) => r.sessionKey === s.key);
+    running.push({
+      agentId,
+      startTime: existing?.startTime || Date.now(),
+      label: s.label || s.displayName || '',
+      sessionKey: s.key,
+    });
+  }
+
+  // Only update store if list actually changed
+  const prevKeys = new Set(prev.map((r) => r.sessionKey));
+  const newKeys = new Set(running.map((r) => r.sessionKey));
+  const changed =
+    prev.length !== running.length ||
+    running.some((r) => !prevKeys.has(r.sessionKey)) ||
+    prev.some((r) => !newKeys.has(r.sessionKey));
+
+  if (!changed) return;
+
+  // Log transitions
+  for (const r of running) {
+    if (!prevKeys.has(r.sessionKey)) {
+      console.log('[DataStore] 🚀 Sub-agent detected:', r.agentId, r.label);
+    }
+  }
+  for (const old of prev) {
+    if (!newKeys.has(old.sessionKey)) {
+      console.log('[DataStore] ✅ Sub-agent done:', old.agentId);
+    }
+  }
+
+  store.setRunningSubAgents(running);
 }
 
 // ═══════════════════════════════════════════════════════════

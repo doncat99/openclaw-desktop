@@ -12,6 +12,7 @@ import {
   globalShortcut,
   clipboard,
 } from 'electron';
+import { autoUpdater } from 'electron-updater';
 import * as path from 'path';
 import * as fs from 'fs';
 import { createTray } from './tray';
@@ -24,6 +25,9 @@ try {
 } catch (err: any) {
   console.warn('[PTY] node-pty not available — Terminal disabled:', err.message);
 }
+
+// Windows requires AppUserModelId for desktop notifications (especially in dev mode)
+app.setAppUserModelId('com.aegis.desktop');
 
 // ═══════════════════════════════════════════════════════════
 // Device Identity (Ed25519) — Required for Gateway operator scopes
@@ -625,16 +629,24 @@ function setupIPC(): void {
 
   // ── Native Notifications ──
   ipcMain.handle('notification:show', (_e, title: string, body: string) => {
+    console.log('[Notification] Requested:', title, '—', body.substring(0, 60));
     if (Notification.isSupported()) {
-      const notif = new Notification({ title, body, silent: true });
-      notif.on('click', () => {
-        // Bring window to front when notification is clicked
-        if (mainWindow) {
-          if (mainWindow.isMinimized()) mainWindow.restore();
-          mainWindow.focus();
-        }
-      });
-      notif.show();
+      try {
+        const notif = new Notification({ title, body, silent: true });
+        notif.on('click', () => {
+          if (mainWindow) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.focus();
+          }
+        });
+        notif.on('show', () => console.log('[Notification] Shown successfully'));
+        notif.on('failed', (e: any) => console.error('[Notification] Failed:', e));
+        notif.show();
+      } catch (err: any) {
+        console.error('[Notification] Error creating notification:', err.message);
+      }
+    } else {
+      console.warn('[Notification] Not supported on this platform');
     }
   });
 
@@ -1098,6 +1110,56 @@ function registerHotkey(): void {
 }
 
 // ═══════════════════════════════════════════════════════════
+// Auto-Updater (electron-updater via GitHub Releases)
+// ═══════════════════════════════════════════════════════════
+
+function setupAutoUpdater(): void {
+  if (isDev) {
+    console.log('[Update] Skipped — dev mode');
+    return;
+  }
+
+  autoUpdater.autoDownload = false;
+
+  // Forward updater events → renderer via IPC
+  autoUpdater.on('update-available', (info) => {
+    console.log('[Update] Available:', info.version);
+    mainWindow?.webContents.send('update:available', info);
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    console.log('[Update] Up to date');
+    mainWindow?.webContents.send('update:up-to-date');
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    console.log(`[Update] Downloading: ${Math.round(progress.percent)}%`);
+    mainWindow?.webContents.send('update:progress', progress);
+  });
+
+  autoUpdater.on('update-downloaded', () => {
+    console.log('[Update] Downloaded — ready to install');
+    mainWindow?.webContents.send('update:downloaded');
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.error('[Update] Error:', err.message);
+    mainWindow?.webContents.send('update:error', err.message);
+  });
+
+  // IPC handlers — renderer can trigger update actions
+  ipcMain.handle('update:check', () => autoUpdater.checkForUpdates());
+  ipcMain.handle('update:download', () => autoUpdater.downloadUpdate());
+  ipcMain.handle('update:install', () => autoUpdater.quitAndInstall());
+
+  // Initial check on startup
+  autoUpdater.checkForUpdates();
+
+  // Periodic check every 60 minutes
+  setInterval(() => autoUpdater.checkForUpdates(), 60 * 60 * 1000);
+}
+
+// ═══════════════════════════════════════════════════════════
 // App Lifecycle
 // ═══════════════════════════════════════════════════════════
 
@@ -1120,6 +1182,7 @@ if (!gotTheLock) {
     createSplashWindow();
     createWindow();
     setupIPC();
+    setupAutoUpdater();
     tray = createTray(mainWindow!, app);
     registerHotkey();
 
@@ -1146,5 +1209,5 @@ app.on('before-quit', () => {
   ptyProcesses.clear();
 });
 
-console.log('🛡️ AEGIS Desktop v5.3 started');
+console.log('🛡️ AEGIS Desktop v5.4 started');
 

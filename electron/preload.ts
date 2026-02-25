@@ -133,6 +133,28 @@ const api = {
     },
   },
 
+  // ── Auto-Update ──
+  update: {
+    check: () => ipcRenderer.invoke('update:check'),
+    download: () => ipcRenderer.invoke('update:download'),
+    install: () => ipcRenderer.invoke('update:install'),
+    onAvailable: (cb: (info: any) => void) => {
+      ipcRenderer.on('update:available', (_e, info) => cb(info));
+    },
+    onUpToDate: (cb: () => void) => {
+      ipcRenderer.on('update:up-to-date', () => cb());
+    },
+    onProgress: (cb: (progress: any) => void) => {
+      ipcRenderer.on('update:progress', (_e, p) => cb(p));
+    },
+    onDownloaded: (cb: () => void) => {
+      ipcRenderer.on('update:downloaded', () => cb());
+    },
+    onError: (cb: (msg: string) => void) => {
+      ipcRenderer.on('update:error', (_e, msg) => cb(msg));
+    },
+  },
+
   // ── Native Notifications ──
   notify: (title: string, body: string) =>
     ipcRenderer.invoke('notification:show', title, body),
@@ -156,4 +178,4 @@ contextBridge.exposeInMainWorld('aegis', api);
 // Type declaration for renderer
 export type AegisAPI = typeof api;
 
-console.log('🛡️ AEGIS Preload v5.3 ready');
+console.log('🛡️ AEGIS Preload v5.4 ready');

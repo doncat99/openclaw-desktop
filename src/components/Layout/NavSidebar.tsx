@@ -114,7 +114,7 @@ export function NavSidebar() {
       </nav>
 
       {/* Bottom: User Avatar */}
-      <div className="mt-auto pt-3">
+      <div className="pt-3">
         <div className={clsx(
           'w-[36px] h-[36px] rounded-xl',
           'bg-gradient-to-br from-aegis-primary/20 to-[rgba(213,0,249,0.15)]',

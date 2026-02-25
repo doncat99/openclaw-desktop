@@ -267,6 +267,117 @@ function ThinkingPicker({ currentThinking }: { currentThinking: string | null })
 }
 
 // ═══════════════════════════════════════════════════════════
+// useAutoUpdate — Tracks electron-updater state
+// ═══════════════════════════════════════════════════════════
+
+type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error';
+
+function useAutoUpdate() {
+  const [status, setStatus] = useState<UpdateStatus>('idle');
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const [downloadPercent, setDownloadPercent] = useState(0);
+
+  useEffect(() => {
+    const api = window.aegis?.update;
+    if (!api) return;
+
+    api.onAvailable((info) => {
+      setUpdateVersion(info.version ?? null);
+      setStatus('available');
+    });
+    api.onUpToDate(() => setStatus('idle'));
+    api.onProgress((p) => {
+      setDownloadPercent(Math.round(p.percent ?? 0));
+      setStatus('downloading');
+    });
+    api.onDownloaded(() => setStatus('ready'));
+    api.onError(() => setStatus('error'));
+  }, []);
+
+  const check = async () => {
+    const api = window.aegis?.update;
+    if (!api) return;
+    setStatus('checking');
+    try {
+      await api.check();
+    } catch {
+      setStatus('error');
+    }
+  };
+
+  const download = async () => {
+    const api = window.aegis?.update;
+    if (!api) return;
+    try {
+      await api.download();
+    } catch {
+      setStatus('error');
+    }
+  };
+
+  const install = () => window.aegis?.update.install();
+
+  return { status, updateVersion, downloadPercent, check, download, install };
+}
+
+// ── VersionBadge — Colored pill showing version + update state ────────────
+function VersionBadge() {
+  const { status, updateVersion, downloadPercent, check, download, install } = useAutoUpdate();
+
+  // Dev mode — static green badge, no update checks
+  if (APP_VERSION === 'dev') {
+    return (
+      <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold font-mono bg-aegis-success/15 text-aegis-success border border-aegis-success/30 transition-colors duration-300">
+        Version dev
+      </span>
+    );
+  }
+
+  const handleClick = () => {
+    if (status === 'idle' || status === 'error') check();
+    else if (status === 'available') download();
+    else if (status === 'ready') install();
+  };
+
+  const isClickable = ['idle', 'error', 'available', 'ready'].includes(status);
+  const isYellow = ['available', 'downloading', 'ready'].includes(status);
+  const isPulsing = status === 'checking' || status === 'downloading';
+
+  let label: string;
+  switch (status) {
+    case 'checking':    label = `v${APP_VERSION}`; break;
+    case 'available':   label = `Update v${updateVersion ?? ''}`; break;
+    case 'downloading': label = `Downloading ${downloadPercent}%`; break;
+    case 'ready':       label = 'Restart to update'; break;
+    case 'error':       label = `v${APP_VERSION}`; break;
+    default:            label = `v${APP_VERSION} ✓`; break;
+  }
+
+  return (
+    <button
+      onClick={isClickable ? handleClick : undefined}
+      title={
+        status === 'idle'      ? 'Click to check for updates' :
+        status === 'available' ? `Update to v${updateVersion} — click to download` :
+        status === 'ready'     ? 'Update downloaded — click to restart' :
+        status === 'error'     ? 'Update check failed — click to retry' :
+        undefined
+      }
+      className={clsx(
+        'rounded-full px-2 py-0.5 text-[10px] font-semibold font-mono transition-colors duration-300',
+        isYellow
+          ? 'bg-aegis-warning/15 text-aegis-warning border border-aegis-warning/30'
+          : 'bg-aegis-success/15 text-aegis-success border border-aegis-success/30',
+        isPulsing && 'animate-pulse',
+        isClickable ? 'cursor-pointer' : 'cursor-default'
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
 export function TitleBar() {
   const { t } = useTranslation();
   const [isMaximized, setIsMaximized] = useState(false);
@@ -302,8 +413,9 @@ export function TitleBar() {
             AEGIS
           </span>
           <span className="text-[10px] text-aegis-text-dim tracking-[1px]">
-            DESKTOP <span className="opacity-50">v{APP_VERSION}</span>
+            DESKTOP
           </span>
+          <VersionBadge />
         </div>
 
         {/* Model + Tokens + Status */}

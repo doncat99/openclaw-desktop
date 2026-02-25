@@ -6,9 +6,7 @@
 import { Outlet, useLocation } from 'react-router-dom';
 import { TitleBar } from '@/components/TitleBar';
 import { NavSidebar } from '@/components/Layout/NavSidebar';
-import { ChatWidget } from '@/components/Chat/ChatWidget';
 import { CommandPalette } from '@/components/CommandPalette';
-import { NotificationCenter } from '@/components/NotificationCenter';
 import { OfflineOverlay } from '@/components/OfflineOverlay';
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary';
 import { useChatStore } from '@/stores/chatStore';
@@ -49,10 +47,6 @@ export function AppLayout() {
           </div>
         </main>
       </div>
-      {/* Floating Chat Widget — available on all pages */}
-      <ChatWidget />
-      {/* Notification Center panel */}
-      <NotificationCenter />
       {/* Command Palette overlay */}
       <CommandPalette />
     </div>

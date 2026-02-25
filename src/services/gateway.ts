@@ -645,9 +645,9 @@ class GatewayService {
     }
   }
 
-  /** Update an agent's extra params (e.g. context1m). */
-  async updateAgentParams(agentId: string, extraParams: Record<string, any>): Promise<any> {
-    return this.request('agents.update', { agentId, extraParams });
+  /** Update an agent's params (e.g. cacheRetention, temperature, context1m). */
+  async updateAgentParams(agentId: string, params: Record<string, any>): Promise<any> {
+    return this.request('agents.update', { agentId, params });
   }
 
   // ── Session Status (token usage) ──
@@ -777,15 +777,18 @@ class GatewayService {
   // }}
   // ═══════════════════════════════════════════════════════════
   private handleToolStream(payload: any) {
-    // Only process when Tool Intent View is enabled in settings
-    if (!useSettingsStore.getState().toolIntentEnabled) return;
-
     const data = payload.data ?? {};
     const toolCallId = typeof data.toolCallId === 'string' ? data.toolCallId : '';
-    if (!toolCallId) return;
-
     const toolName = typeof data.name === 'string' ? data.name : 'tool';
     const phase    = typeof data.phase === 'string' ? data.phase : '';
+
+    // NOTE: Sub-agent tracking moved to polling-based detection in gatewayDataStore.
+    // Gateway WebSocket does NOT emit stream:"tool" events, so handleToolStream
+    // only fires for visual tool cards (Tool Intent View).
+
+    // Only process visual tool cards when Tool Intent View is enabled
+    if (!useSettingsStore.getState().toolIntentEnabled) return;
+    if (!toolCallId) return;
     const msgId    = `tool-live-${toolCallId}`;
 
     const store = useChatStore.getState();
@@ -926,7 +929,9 @@ class GatewayService {
     // Filter out events from isolated cron/sub-agent sessions
     // Only show messages from main session or sessions the user explicitly opened
     const sessionKey = p.sessionKey || '';
-    if (sessionKey && sessionKey !== 'agent:main:main') {
+    // Block only truly isolated sessions (cron jobs and sub-agent runs).
+    // Main sessions may use any suffix: agent:main:main, agent:main:webchat, etc.
+    if (sessionKey && (sessionKey.includes(':subagent:') || sessionKey.includes(':cron:'))) {
       console.log('[GW] Ignoring event from isolated session:', sessionKey);
       return;
     }

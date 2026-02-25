@@ -209,6 +209,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
           },
         };
       }
+      // Message not found — this happens when post-tool-call text arrives
+      // with a new runId that had no preceding delta events. Create a new message.
+      if (content && content.trim()) {
+        const newMsg: ChatMessage = {
+          id,
+          role: 'assistant',
+          content,
+          timestamp: new Date().toISOString(),
+          isStreaming: false,
+          ...(extra?.mediaUrl ? { mediaUrl: extra.mediaUrl, mediaType: extra.mediaType } : {}),
+        };
+        const updated = [...state.messages, newMsg];
+        return {
+          messages: updated,
+          isTyping: false,
+          messagesPerSession: {
+            ...state.messagesPerSession,
+            [state.activeSessionKey]: updated,
+          },
+        };
+      }
       return { isTyping: false };
     });
   },

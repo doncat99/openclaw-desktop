@@ -1,41 +1,43 @@
 // ═══════════════════════════════════════════════════════════
-// Notification Service — Desktop notifications with sound
+// Notification Service — Sound + visual toast notifications
+// No OS notifications, no Electron IPC, no Web Notification API
 // ═══════════════════════════════════════════════════════════
 
-export interface NotificationOptions {
+import { useNotificationStore, type NotificationType } from '@/stores/notificationStore';
+
+export interface NotifyOptions {
+  type: NotificationType;
   title: string;
   body: string;
-  silent?: boolean;
-  tag?: string;
 }
 
 class NotificationService {
-  private enabled = true;
-  private soundEnabled = true;
-  private dndMode = false;
+  private _enabled = true;
+  private _soundEnabled = true;
+  private _dndMode = false;
 
-  // Notification sound (short pleasant chime)
   private audioCtx: AudioContext | null = null;
 
-  setEnabled(enabled: boolean) {
-    this.enabled = enabled;
-  }
+  // ── Getters / setters ────────────────────────────────────
+  get enabled(): boolean { return this._enabled; }
+  set enabled(v: boolean) { this._enabled = v; }
 
-  setSoundEnabled(enabled: boolean) {
-    this.soundEnabled = enabled;
-  }
+  get soundEnabled(): boolean { return this._soundEnabled; }
+  set soundEnabled(v: boolean) { this._soundEnabled = v; }
 
-  setDndMode(dnd: boolean) {
-    this.dndMode = dnd;
-  }
+  get dndMode(): boolean { return this._dndMode; }
+  set dndMode(v: boolean) { this._dndMode = v; }
 
-  isEnabled() { return this.enabled; }
-  isSoundEnabled() { return this.soundEnabled; }
-  isDndMode() { return this.dndMode; }
+  // Compat helpers (called from SettingsPage)
+  setEnabled(v: boolean) { this._enabled = v; }
+  setSoundEnabled(v: boolean) { this._soundEnabled = v; }
+  setDndMode(v: boolean) { this._dndMode = v; }
 
-  // Play a pleasant notification chime using Web Audio API
-  private playChime() {
-    if (!this.soundEnabled || this.dndMode) return;
+  // ── Sound ────────────────────────────────────────────────
+
+  /** Play a pleasant two-tone chime (C5 → E5) via Web Audio API. */
+  playChime(): void {
+    if (!this._soundEnabled || this._dndMode) return;
 
     try {
       if (!this.audioCtx) {
@@ -44,8 +46,8 @@ class NotificationService {
       const ctx = this.audioCtx;
       const now = ctx.currentTime;
 
-      // Two-tone chime (C5 → E5)
-      const notes = [523.25, 659.25]; // C5, E5
+      // C5 = 523.25 Hz, E5 = 659.25 Hz
+      const notes = [523.25, 659.25];
       notes.forEach((freq, i) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -60,48 +62,100 @@ class NotificationService {
         osc.stop(now + i * 0.12 + 0.4);
       });
     } catch {
-      // Silent fallback
+      // Silent fallback — AudioContext may be unavailable
     }
   }
 
-  // Send a desktop notification
-  notify(options: NotificationOptions) {
-    if (!this.enabled || this.dndMode) return;
+  // ── Core notify ──────────────────────────────────────────
 
-    // Play sound
-    if (!options.silent) {
-      this.playChime();
-    }
+  /**
+   * Play chime and show visual notification.
+   * - Window focused → in-app toast (rendered in React)
+   * - Window NOT focused (minimized/background) → Web Notification API
+   *   (Chromium throttles React renders when page is hidden, so toasts won't appear.
+   *    Web Notification API works from the renderer — same approach as v4.0 which worked reliably.)
+   * Both gates respect `enabled` and `dndMode`.
+   */
+  notify(options: NotifyOptions): void {
+    if (!this._enabled || this._dndMode) return;
+    this.playChime();
 
-    // System notification (Electron)
-    if (window.aegis?.notify) {
-      window.aegis.notify(options.title, options.body);
-    } else if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification(options.title, {
-        body: options.body,
-        icon: '/icon.png',
-        tag: options.tag,
-        silent: true, // We handle sound ourselves
-      });
+    if (document.hasFocus()) {
+      // Window visible — in-app toast works fine
+      useNotificationStore.getState().addToast(options.type, options.title, options.body);
+    } else {
+      // Window minimized/background — try both methods for maximum reliability:
+      // 1. Web Notification API (worked in v4 dev mode)
+      // 2. Electron IPC fallback (works in production where file:// may block Web API)
+      this.showOSNotification(options.title, options.body);
     }
   }
 
-  // Check if window is focused
+  /**
+   * Show OS notification — tries Web API first, falls back to Electron IPC.
+   * Belt-and-suspenders: dev mode uses Web API (http://localhost),
+   * production may need IPC (file:// origin can block Web Notifications).
+   */
+  private showOSNotification(title: string, body: string): void {
+    // Method 1: Electron IPC → Main Process Notification (no permission needed, instant)
+    const hasIPC = !!(window as any).aegis?.notify;
+    if (hasIPC) {
+      try {
+        (window as any).aegis.notify(title, body);
+        console.log('[Notify] IPC — sent');
+        return;
+      } catch (err) {
+        console.warn('[Notify] IPC failed:', err);
+      }
+    }
+
+    // Method 2: Web Notification API fallback (dev mode where IPC may not exist)
+    try {
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification(title, { body, silent: true });
+        console.log('[Notify] Web API — shown');
+      } else {
+        console.log('[Notify] Web API — permission:', 'Notification' in window ? Notification.permission : 'unavailable');
+      }
+    } catch (err) {
+      console.warn('[Notify] Web API failed:', err);
+    }
+  }
+
+  /** Request Web Notification permission (call once at app startup). */
+  requestPermission(): void {
+    try {
+      if ('Notification' in window) {
+        console.log('[Notify] Current permission:', Notification.permission);
+        if (Notification.permission === 'default') {
+          Notification.requestPermission().then((result) => {
+            console.log('[Notify] Permission result:', result);
+          });
+        }
+      }
+    } catch {
+      // Silent — may not be available
+    }
+  }
+
+  // ── Conditional helpers ──────────────────────────────────
+
+  /** Returns true if the app window currently has focus. */
   isWindowFocused(): boolean {
     return document.hasFocus();
   }
 
-  // Notify only if window is not focused
-  notifyIfBackground(options: NotificationOptions) {
-    if (!this.isWindowFocused()) {
+  /** Notify only when the window IS focused (user is inside the app but not on chat). */
+  notifyIfVisible(options: NotifyOptions): void {
+    if (this.isWindowFocused()) {
       this.notify(options);
     }
   }
 
-  // Request permission (for browser fallback)
-  async requestPermission() {
-    if ('Notification' in window && Notification.permission === 'default') {
-      await Notification.requestPermission();
+  /** Notify only when the window is NOT focused (user has Alt+Tabbed away). */
+  notifyIfBackground(options: NotifyOptions): void {
+    if (!this.isWindowFocused()) {
+      this.notify(options);
     }
   }
 }

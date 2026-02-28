@@ -131,8 +131,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "AegisStar",
-        "repo": "aegis-desktop"
+        "owner": "rshodoskar-star",
+        "repo": "openclaw-desktop"
       }
     ]
   }

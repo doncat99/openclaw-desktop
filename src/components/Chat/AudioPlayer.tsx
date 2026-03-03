@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Play, Pause, Volume2, VolumeX, RotateCcw } from 'lucide-react';
 import clsx from 'clsx';
+import { getStorageItem, storageKey } from '@/utils/storage';
 
 // ═══════════════════════════════════════════════════════════
 // AudioPlayer — Custom audio player for TTS / voice messages
@@ -38,7 +39,7 @@ export function AudioPlayer({ src, className }: AudioPlayerProps) {
       // Sandbox /tmp/ paths → serve via TTS HTTP server (port configurable via IPC)
       if (filePath.startsWith('/tmp/tts-') || filePath.startsWith('/tmp/')) {
         const fileName = filePath.split('/').pop();
-        const ttsPort = localStorage.getItem('aegis-tts-port') || '5050';
+        const ttsPort = getStorageItem(storageKey('tts-port')) || '5050';
         const httpUrl = `http://localhost:${ttsPort}/audio/${fileName}`;
         console.log('[AudioPlayer] 🔊 Resolving sandbox path via HTTP:', httpUrl);
 

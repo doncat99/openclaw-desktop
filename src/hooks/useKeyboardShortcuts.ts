@@ -4,10 +4,10 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { useChatStore } from '@/stores/chatStore';
 
 // ═══════════════════════════════════════════════════════════
-// Keyboard Shortcuts — Global hotkeys for AEGIS Desktop
+// Keyboard Shortcuts — Global hotkeys for OntoSynth Desktop
 // ═══════════════════════════════════════════════════════════
 
-const NAV_ROUTES = ['/', '/chat', '/workshop', '/costs', '/cron', '/agents', '/memory', '/settings'];
+const NAV_ROUTES = ['/', '/assignments', '/chat', '/workshop', '/costs', '/cron', '/agents', '/memory', '/settings'];
 
 export function useKeyboardShortcuts() {
   const navigate = useNavigate();
@@ -44,10 +44,10 @@ export function useKeyboardShortcuts() {
       // ── Only when NOT in text inputs ──
       if (isInput) return;
 
-      // Ctrl+1-8 → Navigate pages
+      // Ctrl+1-9 → Navigate pages
       if (ctrl && !shift) {
         const num = parseInt(e.key);
-        if (num >= 1 && num <= 8 && NAV_ROUTES[num - 1]) {
+        if (num >= 1 && num <= 9 && NAV_ROUTES[num - 1]) {
           e.preventDefault();
           navigate(NAV_ROUTES[num - 1]);
           return;

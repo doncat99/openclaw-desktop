@@ -1,11 +1,17 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { migrateStorageKey, storageKey } from '@/utils/storage';
 
 // ═══════════════════════════════════════════════════════════
 // Workshop Store — Kanban tasks + Activity Log
 // ═══════════════════════════════════════════════════════════
 
 export interface Task {
+  applicationId?: string;
+  inputDocs?: TaskInputDocument[];
+  inputDocMode?: 'standardTextbook' | 'rawDocuments';
+  standardInputDocs?: TaskInputDocument[];
+  rawInputDocs?: TaskInputDocument[];
   id: string;
   title: string;
   description: string;
@@ -16,16 +22,29 @@ export interface Task {
   tags: string[];
   assignedAgent?: string;
   progress?: number; // 0-100, for inProgress tasks
+  lastRunAt?: string;
+  lastRunStatus?: 'ok' | 'error';
+  lastRunError?: string;
+  lastRunAgent?: string;
+  lastRunSessionKey?: string;
+}
+
+export interface TaskInputDocument {
+  name: string;
+  mimeType: string;
+  size: number;
+  path?: string;
 }
 
 export interface ActivityEntry {
   id: string;
-  type: 'created' | 'moved' | 'progress' | 'deleted' | 'completed';
+  type: 'created' | 'moved' | 'progress' | 'deleted' | 'completed' | 'run' | 'runError';
   taskTitle: string;
   agent?: string;
   from?: string;
   to?: string;
   progress?: number;
+  error?: string;
   timestamp: string;
 }
 
@@ -37,7 +56,8 @@ interface WorkshopState {
   deleteTask: (id: string) => void;
   reorderInColumn: (status: Task['status'], orderedIds: string[]) => void;
   setProgress: (id: string, progress: number) => void;
-  updateTask: (id: string, updates: Partial<Pick<Task, 'title' | 'description' | 'priority' | 'tags' | 'assignedAgent'>>) => void;
+  updateTask: (id: string, updates: Partial<Pick<Task, 'title' | 'description' | 'priority' | 'tags' | 'assignedAgent' | 'applicationId'>>) => void;
+  setTaskRunResult: (id: string, run: { status: 'ok' | 'error'; agent?: string; error?: string; sessionKey?: string }) => void;
   clearCompleted: () => void;
 }
 
@@ -63,6 +83,9 @@ const STATUS_LABELS: Record<string, string> = {
   done: 'Done',
 };
 
+const WORKSHOP_STORAGE_KEY = storageKey('workshop-tasks');
+migrateStorageKey(WORKSHOP_STORAGE_KEY, 'aegis-workshop-tasks');
+
 export const useWorkshopStore = create<WorkshopState>()(
   persist(
     (set, get) => ({
@@ -76,6 +99,9 @@ export const useWorkshopStore = create<WorkshopState>()(
           status: 'queue',
           createdAt: new Date().toISOString(),
           tags: partial.tags || [],
+          inputDocs: partial.inputDocs || [],
+          standardInputDocs: partial.standardInputDocs || [],
+          rawInputDocs: partial.rawInputDocs || [],
         };
         return {
           tasks: [...state.tasks, task],
@@ -137,6 +163,31 @@ export const useWorkshopStore = create<WorkshopState>()(
         tasks: state.tasks.map((t) => t.id === id ? { ...t, ...updates } : t),
       })),
 
+      setTaskRunResult: (id, run) => set((state) => {
+        const task = state.tasks.find((t) => t.id === id);
+        if (!task) return state;
+        const timestamp = new Date().toISOString();
+        return {
+          tasks: state.tasks.map((t) => (t.id === id
+            ? {
+                ...t,
+                lastRunAt: timestamp,
+                lastRunStatus: run.status,
+                lastRunError: run.error,
+                lastRunAgent: run.agent,
+                lastRunSessionKey: run.sessionKey,
+              }
+            : t)),
+          activities: [
+            makeActivity(run.status === 'ok' ? 'run' : 'runError', task.title, {
+              agent: run.agent,
+              error: run.error,
+            }),
+            ...state.activities,
+          ].slice(0, MAX_ACTIVITIES),
+        };
+      }),
+
       clearCompleted: () => set((state) => ({
         tasks: state.tasks.filter((t) => t.status !== 'done'),
       })),
@@ -149,6 +200,6 @@ export const useWorkshopStore = create<WorkshopState>()(
         return { tasks: [...others, ...columnTasks] };
       }),
     }),
-    { name: 'aegis-workshop-tasks' },
+    { name: WORKSHOP_STORAGE_KEY },
   ),
 );

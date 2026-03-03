@@ -5,7 +5,7 @@ import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/pris
 import { Copy, Check } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════
-// Code Block — Theme-aware (dark/light) matching AEGIS design
+// Code Block — Theme-aware (dark/light) matching OntoSynth design
 // Uses CSS variables: --aegis-code-bg, --aegis-code-header
 // ═══════════════════════════════════════════════════════════
 
@@ -14,7 +14,7 @@ interface CodeBlockProps {
   code: string;
 }
 
-/** Build syntax theme from base (oneDark/oneLight) with AEGIS overrides */
+/** Build syntax theme from base (oneDark/oneLight) with OntoSynth overrides */
 function buildTheme(base: Record<string, any>) {
   return {
     ...base,

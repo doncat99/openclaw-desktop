@@ -6,7 +6,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Loader2, RotateCcw, ChevronDown, Zap, AlertCircle, Bot, Search, Code2, Brain, Plus, Trash2, Settings2 } from 'lucide-react';
+import { Loader2, RotateCcw, ChevronDown, ChevronRight, Zap, AlertCircle, Bot, Search, Code2, Brain, Plus, Trash2, Settings2 } from 'lucide-react';
 import { AgentSettingsPanel } from './AgentSettingsPanel';
 import { GlassCard } from '@/components/shared/GlassCard';
 import { PageTransition } from '@/components/shared/PageTransition';
@@ -25,7 +25,7 @@ import { themeHex, themeAlpha, dataColor } from '@/utils/theme-colors';
 interface SessionInfo {
   key: string;
   label: string;
-  type: 'main' | 'cron' | 'subagent';
+  type: 'main' | 'cron' | 'subagent' | 'task';
   model: string;
   totalTokens: number;
   contextTokens: number;
@@ -44,6 +44,7 @@ interface AgentInfo {
 }
 
 type ViewMode = 'tree' | 'grid' | 'activity';
+type AgentRole = 'controller' | 'courseOrchestrator' | 'courseSpecialist' | 'other';
 
 // ═══════════════════════════════════════════════════════════
 // Worker classification
@@ -53,6 +54,7 @@ interface WorkerMeta { icon: string; color: string; tag: string; }
 
 /** Worker meta — called at render time so dataColor() reads current theme */
 const getWorkerMeta = (label: string, type: string): WorkerMeta => {
+  if (type === 'task' || /workshop-task|assignment|task/i.test(label)) return { icon: '📋', color: dataColor(4), tag: 'TASK' };
   if (/sync/i.test(label))                     return { icon: '🔄', color: dataColor(9), tag: 'SYNC' };
   if (/embed/i.test(label))                    return { icon: '🧠', color: dataColor(3), tag: 'EMBED' };
   if (/maintenance|صيانة/i.test(label))        return { icon: '🧹', color: dataColor(3), tag: 'MAINTENANCE' };
@@ -94,7 +96,155 @@ function getTreeNodeConfig(id: string): { icon: string; color: string } {
   if (/hilal/i.test(id))         return { icon: '⚽', color: dataColor(6) };
   if (/consult|advisor/i.test(id)) return { icon: '🧠', color: dataColor(3) };
   if (/code|dev/i.test(id))      return { icon: '💻', color: dataColor(5) };
+  if (/structure/i.test(id))     return { icon: '🧩', color: dataColor(4) };
+  if (/knowledge/i.test(id))     return { icon: '📚', color: dataColor(3) };
+  if (/mindmap/i.test(id))       return { icon: '🗺️', color: dataColor(6) };
+  if (/assessment/i.test(id))    return { icon: '📝', color: dataColor(9) };
+  if (/slide/i.test(id))         return { icon: '🖼️', color: dataColor(5) };
   return { icon: '🤖', color: dataColor(1) };
+}
+
+function looksLikeCourseSpecialist(id: string, name: string): boolean {
+  const idNorm = id.trim().toLowerCase();
+  const nameNorm = name.trim().toLowerCase();
+  if (!idNorm && !nameNorm) return false;
+  return (
+    idNorm.startsWith('os-course-')
+    || idNorm.startsWith('os.course.')
+    || idNorm.startsWith('course-')
+    || nameNorm.startsWith('course ')
+    || nameNorm.includes(' specialist')
+  );
+}
+
+function looksLikeCourseOrchestrator(id: string, name: string): boolean {
+  const idNorm = id.trim().toLowerCase();
+  const nameNorm = name.trim().toLowerCase();
+  if (!idNorm && !nameNorm) return false;
+  return (
+    idNorm === 'course-orchestrator'
+    || idNorm === 'ontosynth-orchestrator'
+    || idNorm === 'os-orchestrator'
+    || idNorm === 'os.orchestrator'
+    || nameNorm.includes('course orchestrator')
+    || nameNorm.includes('ontosynth orchestrator')
+  );
+}
+
+function getSpecialistTitle(agent: AgentInfo): string {
+  const raw = `${agent.id} ${agent.name || ''}`.toLowerCase();
+  if (raw.includes('structure')) return 'Course Structure Specialist';
+  if (raw.includes('knowledge')) return 'Course Knowledge Specialist';
+  if (raw.includes('mindmap')) return 'Course Mindmap Specialist';
+  if (raw.includes('assessment')) return 'Course Assessment Specialist';
+  if (raw.includes('slide')) return 'Course Slide Specialist';
+  return agent.name || agent.id;
+}
+
+function getAgentRole(agent: AgentInfo): AgentRole {
+  if (agent.id === 'main') return 'controller';
+  const name = agent.name || '';
+  if (looksLikeCourseOrchestrator(agent.id, name)) return 'courseOrchestrator';
+  if (looksLikeCourseSpecialist(agent.id, name)) return 'courseSpecialist';
+  return 'other';
+}
+
+function getHierarchyDisplayName(agent: AgentInfo): string {
+  const role = getAgentRole(agent);
+  if (role === 'controller') return 'OpenClaw Controller Agent';
+  if (role === 'courseOrchestrator') return 'Course Orchestrator';
+  if (role === 'courseSpecialist') return getSpecialistTitle(agent);
+  return agent.name || agent.id;
+}
+
+function mapSpecialistsToOrchestrator(
+  specialists: AgentInfo[],
+  orchestrators: AgentInfo[],
+): Record<string, AgentInfo[]> {
+  const map: Record<string, AgentInfo[]> = {};
+  orchestrators.forEach((o) => { map[o.id] = []; });
+  if (!specialists.length) return map;
+  const fallback = orchestrators[0]?.id;
+  for (const specialist of specialists) {
+    if (!fallback) continue;
+    map[fallback].push(specialist);
+  }
+  return map;
+}
+
+function parseTimeMs(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const ts = Date.parse(value);
+    if (!Number.isNaN(ts)) return ts;
+  }
+  return 0;
+}
+
+function inferCronAgentId(job: any): string {
+  const direct = typeof job?.agentId === 'string' ? job.agentId.trim() : '';
+  if (direct) return direct;
+  const payload = job?.payload || {};
+  const payloadAgent = typeof payload?.agentId === 'string' ? payload.agentId.trim() : '';
+  if (payloadAgent) return payloadAgent;
+  const paramsAgent = typeof payload?.params?.agentId === 'string' ? payload.params.agentId.trim() : '';
+  if (paramsAgent) return paramsAgent;
+  return 'main';
+}
+
+function buildCronWorkerSessions(jobs: any[]): SessionInfo[] {
+  return jobs.map((job) => {
+    const id = typeof job?.id === 'string' ? job.id : String(job?.id || '');
+    const name = typeof job?.name === 'string' && job.name.trim() ? job.name.trim() : `Cron ${id.slice(0, 8)}`;
+    const state = job?.state;
+    const running = !!(state?.running || state === 'running');
+    const updatedAt = Math.max(
+      parseTimeMs(job?.lastRun),
+      parseTimeMs(state?.lastRunAt),
+      parseTimeMs(state?.updatedAt),
+      parseTimeMs(job?.updatedAt),
+    );
+    return {
+      key: `cronjob:${id}`,
+      label: `Cron: ${name}`,
+      type: 'cron',
+      model: '',
+      totalTokens: 0,
+      contextTokens: 200000,
+      running,
+      updatedAt,
+      agentId: inferCronAgentId(job),
+    } as SessionInfo;
+  });
+}
+
+function extractCronIdFromSessionKey(key: string): string {
+  const marker = ':cron:';
+  const idx = key.indexOf(marker);
+  if (idx < 0) return '';
+  const tail = key.slice(idx + marker.length);
+  const parts = tail.split(':').filter(Boolean);
+  return parts[0] || '';
+}
+
+function extractTaskIdFromSessionKey(key: string): string {
+  const marker = ':workshop-task-';
+  const idx = key.indexOf(marker);
+  if (idx < 0) return '';
+  return key.slice(idx + marker.length).split(':')[0] || '';
+}
+
+function canonicalWorkerKey(worker: SessionInfo): string {
+  if (worker.type === 'cron') {
+    if (worker.key.startsWith('cronjob:')) return `cron:${worker.key.slice('cronjob:'.length)}`;
+    const id = extractCronIdFromSessionKey(worker.key);
+    if (id) return `cron:${id}`;
+  }
+  if (worker.type === 'task') {
+    const id = extractTaskIdFromSessionKey(worker.key);
+    if (id) return `task:${worker.agentId}:${id}`;
+  }
+  return `${worker.type}:${worker.key}`;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -114,22 +264,29 @@ const timeAgo = (ts?: number) => {
   return `${Math.floor(diff / 86400000)}d ago`;
 };
 
-const getSessionType = (key: string): 'main' | 'cron' | 'subagent' => {
+const getSessionType = (key: string, kind?: string): 'main' | 'cron' | 'subagent' | 'task' => {
+  const k = (kind || '').toLowerCase();
+  if (k.includes('cron')) return 'cron';
+  if (k.includes('subagent') || k.includes('sub-agent')) return 'subagent';
+  if (k.includes('task') || k.includes('workshop')) return 'task';
+  if (k.includes('main')) return 'main';
   if (key.includes(':cron:')) return 'cron';
   if (key.includes(':subagent:')) return 'subagent';
+  if (key.includes(':workshop-task-') || key.includes(':task:') || key.includes(':job:')) return 'task';
   return 'main';
 };
 
 function parseSessions(raw: any[]): SessionInfo[] {
   return raw.map((s) => {
     const key = s.key || '';
-    const type = getSessionType(key);
+    const type = getSessionType(key, s.kind);
     const parts = key.split(':');
-    const agentId = parts[1] || 'main';
+    const agentId = (typeof s.agentId === 'string' && s.agentId.trim()) ? s.agentId.trim() : (parts[1] || 'main');
     let label = s.label || '';
     if (!label) {
       if (type === 'main') label = 'Main Session';
       else if (type === 'cron') label = `Cron: ${parts[3]?.substring(0, 8) || '?'}`;
+      else if (type === 'task') label = `Task: ${parts.slice(2).join(':') || '?'}`;
       else label = key;
     }
     return { key, label, type, model: s.model || '', totalTokens: s.totalTokens || 0, contextTokens: s.contextTokens || 200000, running: !!s.running, updatedAt: s.updatedAt || 0, agentId };
@@ -144,21 +301,22 @@ function parseSessions(raw: any[]): SessionInfo[] {
 // Tree View — SVG connections + animated dots
 // ═══════════════════════════════════════════════════════════
 
-function TreeView({ mainSession, registeredAgents, workers, agents, onAgentClick }: {
+function TreeView({ mainSession, controllerAgent, courseOrchestrators, specialistsByOrchestrator, workers, onAgentClick }: {
   mainSession: SessionInfo | undefined;
-  registeredAgents: AgentInfo[];
+  controllerAgent: AgentInfo | undefined;
+  courseOrchestrators: AgentInfo[];
+  specialistsByOrchestrator: Record<string, AgentInfo[]>;
   workers: SessionInfo[];
-  agents: AgentInfo[];
   onAgentClick?: (agent: AgentInfo) => void;
 }) {
   const runningSubAgents = useGatewayDataStore((s) => s.runningSubAgents);
-  const agentCount = registeredAgents.length;
-  const mainName = agents.find(a => a.id === 'main')?.name || 'Main Agent';
+  const orchestratorCount = courseOrchestrators.length;
+  const mainName = controllerAgent ? getHierarchyDisplayName(controllerAgent) : 'OpenClaw Controller Agent';
+  const orchestratorColor = themeHex('accent');
 
-  // Group workers by parent agent
   const workersByAgent = useMemo(() => {
     const map: Record<string, SessionInfo[]> = {};
-    workers.forEach(w => {
+    workers.forEach((w) => {
       const pid = w.agentId || 'main';
       if (!map[pid]) map[pid] = [];
       map[pid].push(w);
@@ -166,62 +324,49 @@ function TreeView({ mainSession, registeredAgents, workers, agents, onAgentClick
     return map;
   }, [workers]);
 
-  // Count active children per agent (for spawn badges)
-  const spawnCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    counts['main'] = registeredAgents.length;
-    registeredAgents.forEach(a => {
-      counts[a.id] = (workersByAgent[a.id] || []).length;
-    });
-    return counts;
-  }, [registeredAgents, workersByAgent]);
-
-  // Calculate child X positions for SVG (viewBox 0-1000)
-  const agentPositions = useMemo(() =>
-    registeredAgents.map((_, i) => Math.round(((i + 0.5) / Math.max(agentCount, 1)) * 1000)),
-    [registeredAgents, agentCount]
+  const orchestratorPositions = useMemo(
+    () => courseOrchestrators.map((_, i) => Math.round(((i + 0.5) / Math.max(orchestratorCount, 1)) * 1000)),
+    [courseOrchestrators, orchestratorCount],
   );
 
-  // Flatten all depth-2 workers with their parent X
-  const depth2Layout = useMemo(() => {
-    const items: { worker: SessionInfo; parentX: number }[] = [];
-    registeredAgents.forEach((agent, ai) => {
-      const ws = workersByAgent[agent.id] || [];
-      ws.forEach(w => items.push({ worker: w, parentX: agentPositions[ai] }));
+  const specialistLayout = useMemo(() => {
+    const items: { specialist: AgentInfo; parentId: string; parentX: number }[] = [];
+    courseOrchestrators.forEach((orchestrator, oi) => {
+      const children = specialistsByOrchestrator[orchestrator.id] || [];
+      children.forEach((specialist) => items.push({
+        specialist,
+        parentId: orchestrator.id,
+        parentX: orchestratorPositions[oi] ?? 500,
+      }));
     });
-    // Also add workers under 'main' that aren't under a registered agent
-    const mainWorkers = workersByAgent['main'] || [];
-    mainWorkers.forEach(w => items.push({ worker: w, parentX: 500 }));
     return items;
-  }, [registeredAgents, workersByAgent, agentPositions]);
+  }, [courseOrchestrators, specialistsByOrchestrator, orchestratorPositions]);
 
-  // X positions for depth-2 nodes
-  const depth2Positions = useMemo(() => {
-    if (depth2Layout.length === 0) return [];
-    return depth2Layout.map((_, i) => Math.round(((i + 0.5) / depth2Layout.length) * 1000));
-  }, [depth2Layout]);
+  const specialistPositions = useMemo(() => {
+    if (specialistLayout.length === 0) return [];
+    return specialistLayout.map((_, i) => Math.round(((i + 0.5) / specialistLayout.length) * 1000));
+  }, [specialistLayout]);
 
   return (
     <div className="px-4 py-6 overflow-y-auto">
-
-      {/* ── Depth 0: Main Agent ── */}
       <div className="text-center mb-2">
-        <span className="text-[9px] uppercase tracking-[2px] font-bold text-aegis-text-muted">Depth 0 — Orchestrator</span>
+        <span className="text-[9px] uppercase tracking-[2px] font-bold text-aegis-text-muted">Depth 0 — Controller</span>
       </div>
       <div className="flex justify-center mb-0">
         <div className="relative">
-          {/* Spawn badge */}
-          {(spawnCounts['main'] || 0) > 0 && (
-            <div className="absolute -top-1.5 -end-1.5 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-extrabold border-2 border-[var(--aegis-bg-solid)] z-10"
-              style={{ background: mainColor(), color: 'var(--aegis-bg-solid)' }}>
-              {spawnCounts['main']}
+          {orchestratorCount > 0 && (
+            <div
+              className="absolute -top-1.5 -end-1.5 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-extrabold border-2 border-[var(--aegis-bg-solid)] z-10"
+              style={{ background: mainColor(), color: 'var(--aegis-bg-solid)' }}
+            >
+              {orchestratorCount}
             </div>
           )}
-          <div className="relative rounded-2xl border-2 px-6 py-4 min-w-[280px] overflow-hidden transition-all hover:-translate-y-0.5"
-            style={{ background: `linear-gradient(135deg, ${mainColor()}12, ${mainColor()}06)`, borderColor: `${mainColor()}40` }}>
-            {/* Top accent */}
-            <div className="absolute top-0 inset-x-0 h-[2px] opacity-60"
-              style={{ background: `linear-gradient(90deg, transparent, ${mainColor()}, transparent)` }} />
+          <div
+            className="relative rounded-2xl border-2 px-6 py-4 min-w-[280px] overflow-hidden transition-all hover:-translate-y-0.5"
+            style={{ background: `linear-gradient(135deg, ${mainColor()}12, ${mainColor()}06)`, borderColor: `${mainColor()}40` }}
+          >
+            <div className="absolute top-0 inset-x-0 h-[2px] opacity-60" style={{ background: `linear-gradient(90deg, transparent, ${mainColor()}, transparent)` }} />
             <div className="flex items-center gap-3">
               <div className="w-[52px] h-[52px] rounded-[14px] flex items-center justify-center text-[24px] border relative"
                 style={{ background: `linear-gradient(135deg, ${mainColor()}20, ${mainColor()}05)`, borderColor: `${mainColor()}30` }}>
@@ -234,15 +379,13 @@ function TreeView({ mainSession, registeredAgents, workers, agents, onAgentClick
                 <div className="text-[16px] font-extrabold" style={{ color: mainColor() }}>{mainName}</div>
                 <div className="text-[10px] text-aegis-text-dim font-mono">{mainSession?.model.split('/').pop() || '—'}</div>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="text-[9px] px-2 py-0.5 rounded-md font-bold uppercase"
-                    style={{ background: `${mainColor()}15`, color: mainColor() }}>
+                  <span className="text-[9px] px-2 py-0.5 rounded-md font-bold uppercase" style={{ background: `${mainColor()}15`, color: mainColor() }}>
                     {mainSession?.running ? 'Active' : 'Online'}
                   </span>
                   <span className="text-[10px] text-aegis-text-dim font-mono">
                     {mainSession ? `${formatTokens(mainSession.totalTokens)} / ${formatTokens(mainSession.contextTokens)}` : ''}
                   </span>
                 </div>
-                {/* Token bar */}
                 {mainSession && (
                   <div className="w-full h-[3px] rounded-full bg-[rgb(var(--aegis-overlay)/0.06)] mt-2 overflow-hidden">
                     <div className="h-full rounded-full" style={{
@@ -257,120 +400,95 @@ function TreeView({ mainSession, registeredAgents, workers, agents, onAgentClick
         </div>
       </div>
 
-      {/* ── SVG Connectors: Main → Agents ── */}
-      {agentCount > 0 && (
+      {orchestratorCount > 0 && (
         <div className="relative h-14">
           <svg viewBox="0 0 1000 56" preserveAspectRatio="none" className="w-full h-full">
             <defs>
-              <linearGradient id="grad-main-tree" x1="0%" y1="0%" x2="0%" y2="100%">
+              <linearGradient id="grad-main-orch" x1="0%" y1="0%" x2="0%" y2="100%">
                 <stop offset="0%" stopColor={mainColor()} stopOpacity={0.6} />
-                <stop offset="100%" stopColor={mainColor()} stopOpacity={0.25} />
+                <stop offset="100%" stopColor={orchestratorColor} stopOpacity={0.35} />
               </linearGradient>
             </defs>
-            {agentPositions.map((cx, i) => (
-              <g key={`mc${i}`}>
-                <path d={`M 500,0 L 500,20 L ${cx},20 L ${cx},56`}
-                  stroke="url(#grad-main-tree)" strokeWidth={1.5} fill="none" strokeDasharray="4,3" />
-                {/* Animated dot (alternate to reduce clutter) */}
-                {i % 2 === 0 && (
-                  <circle r={3} fill={mainColor()} opacity={0.7}>
-                    <animateMotion dur={`${3 + i * 0.5}s`} repeatCount="indefinite"
-                      path={`M 500,0 L 500,20 L ${cx},20 L ${cx},56`} />
-                  </circle>
-                )}
+            {orchestratorPositions.map((cx, i) => (
+              <g key={`oc-${i}`}>
+                <path d={`M 500,0 L 500,20 L ${cx},20 L ${cx},56`} stroke="url(#grad-main-orch)" strokeWidth={1.5} fill="none" strokeDasharray="4,3" />
               </g>
             ))}
           </svg>
         </div>
       )}
 
-      {/* ── Depth 1: Specialist Agents ── */}
-      {agentCount > 0 && (
-        <>
-          <div className="text-center mb-2">
-            <span className="text-[9px] uppercase tracking-[2px] font-bold text-aegis-text-muted">Depth 1 — Specialists</span>
-          </div>
-          <div className="flex justify-center gap-4 flex-wrap">
-            {registeredAgents.map((agent) => {
-              const cfg = getTreeNodeConfig(agent.id);
-              const childCount = spawnCounts[agent.id] || 0;
-              const agentSessions = workers.filter(w => w.agentId === agent.id);
-              const activeSessions = agentSessions.filter(s => s.running);
-              const totalTok = agentSessions.reduce((s, sess) => s + sess.totalTokens, 0);
-              const spawned = runningSubAgents.some(sa => sa.agentId === agent.id);
-              const isRunning = activeSessions.length > 0 || spawned;
+      <div className="text-center mb-2">
+        <span className="text-[9px] uppercase tracking-[2px] font-bold text-aegis-text-muted">Depth 1 — Course Orchestrator</span>
+      </div>
+      {courseOrchestrators.length === 0 ? (
+        <div className="text-center text-[11px] text-aegis-text-dim py-3">No Course Orchestrator detected.</div>
+      ) : (
+        <div className="flex justify-center gap-4 flex-wrap">
+          {courseOrchestrators.map((agent) => {
+            const cfg = { icon: '🎯', color: orchestratorColor };
+            const childCount = (specialistsByOrchestrator[agent.id] || []).length;
+            const agentSessions = workersByAgent[agent.id] || [];
+            const activeSessions = agentSessions.filter((s) => s.running);
+            const totalTok = agentSessions.reduce((sum, session) => sum + session.totalTokens, 0);
+            const spawned = runningSubAgents.some((sa) => sa.agentId === agent.id);
+            const isRunning = activeSessions.length > 0 || spawned;
 
-              return (
-                <div key={agent.id} className="relative">
-                  {/* Spawn badge */}
-                  {childCount > 0 && (
-                    <div className="absolute -top-1.5 -end-1.5 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-extrabold border-2 border-[var(--aegis-bg-solid)] z-10"
-                      style={{ background: cfg.color, color: 'var(--aegis-bg-solid)' }}>
-                      {childCount}
+            return (
+              <div key={agent.id} className="relative">
+                {childCount > 0 && (
+                  <div className="absolute -top-1.5 -end-1.5 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-extrabold border-2 border-[var(--aegis-bg-solid)] z-10"
+                    style={{ background: cfg.color, color: 'var(--aegis-bg-solid)' }}>
+                    {childCount}
+                  </div>
+                )}
+                <div
+                  className={clsx(
+                    'relative rounded-2xl border px-5 py-3.5 min-w-[220px] max-w-[260px] overflow-hidden transition-all hover:-translate-y-0.5 cursor-pointer',
+                    isRunning && 'ring-1 ring-aegis-primary/30',
+                  )}
+                  onClick={() => onAgentClick?.(agent)}
+                  style={{ background: `linear-gradient(135deg, ${cfg.color}10, ${cfg.color}04)`, borderColor: isRunning ? `${cfg.color}55` : `${cfg.color}30` }}
+                >
+                  <div className="absolute top-0 inset-x-0 h-[2px] opacity-40" style={{ background: `linear-gradient(90deg, transparent, ${cfg.color}, transparent)` }} />
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-[10px] flex items-center justify-center text-[18px] border relative"
+                      style={{ background: `linear-gradient(135deg, ${cfg.color}15, ${cfg.color}03)`, borderColor: `${cfg.color}20` }}>
+                      {cfg.icon}
+                      {isRunning && <div className="absolute -bottom-[2px] -end-[2px]"><StatusDot status="active" size={8} glow beacon /></div>}
                     </div>
-                  )}
-                  <div className={clsx(
-                    "relative rounded-2xl border px-5 py-3.5 min-w-[200px] max-w-[240px] overflow-hidden transition-all hover:-translate-y-0.5 cursor-pointer",
-                    isRunning && "ring-1 ring-aegis-primary/30"
-                  )}
-                    onClick={() => onAgentClick?.(agent)}
-                    style={{ background: `linear-gradient(135deg, ${cfg.color}10, ${cfg.color}04)`, borderColor: isRunning ? `${cfg.color}50` : `${cfg.color}30` }}>
-                    <div className="absolute top-0 inset-x-0 h-[2px] opacity-40"
-                      style={{ background: `linear-gradient(90deg, transparent, ${cfg.color}, transparent)` }} />
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-[10px] flex items-center justify-center text-[18px] border relative"
-                        style={{ background: `linear-gradient(135deg, ${cfg.color}15, ${cfg.color}03)`, borderColor: `${cfg.color}20` }}>
-                        {cfg.icon}
-                        {isRunning && <div className="absolute -bottom-[2px] -end-[2px]"><StatusDot status="active" size={8} glow beacon /></div>}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[13px] font-bold" style={{ color: cfg.color }}>{agent.name || agent.id}</div>
-                        <div className="text-[9px] text-aegis-text-dim font-mono">
-                          {(agent.model || agentSessions[0]?.model || '—').toString().split('/').pop()}
-                        </div>
-                        <div className="flex items-center gap-1.5 mt-1">
-                          {isRunning ? (
-                            <span className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded font-bold"
-                              style={{ background: `${cfg.color}12`, color: cfg.color }}>
-                              <Loader2 size={9} className="animate-spin" /> Running
-                            </span>
-                          ) : (
-                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgb(var(--aegis-overlay)/0.04)] text-aegis-text-dim font-bold">Idle</span>
-                          )}
-                          {totalTok > 0 && <span className="text-[9px] text-aegis-text-dim font-mono">{formatTokens(totalTok)}</span>}
-                        </div>
-                        {/* Token bar */}
-                        <div className="w-full h-[3px] rounded-full bg-[rgb(var(--aegis-overlay)/0.06)] mt-2 overflow-hidden">
-                          <div className="h-full rounded-full transition-all duration-1000"
-                            style={{ width: `${Math.min(100, agentSessions.length > 0 ? Math.round((agentSessions[0].totalTokens / agentSessions[0].contextTokens) * 100) : 0)}%`, background: cfg.color }} />
-                        </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13px] font-bold" style={{ color: cfg.color }}>{getHierarchyDisplayName(agent)}</div>
+                      <div className="text-[9px] text-aegis-text-dim font-mono">{(agent.model || agentSessions[0]?.model || '—').toString().split('/').pop()}</div>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        {isRunning ? (
+                          <span className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded font-bold" style={{ background: `${cfg.color}12`, color: cfg.color }}>
+                            <Loader2 size={9} className="animate-spin" /> Running
+                          </span>
+                        ) : (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-[rgb(var(--aegis-overlay)/0.04)] text-aegis-text-dim font-bold">Idle</span>
+                        )}
+                        {totalTok > 0 && <span className="text-[9px] text-aegis-text-dim font-mono">{formatTokens(totalTok)}</span>}
                       </div>
                     </div>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        </>
+              </div>
+            );
+          })}
+        </div>
       )}
 
-      {/* ── SVG Connectors: Agents → Workers ── */}
-      {depth2Layout.length > 0 && (
-        <div className="relative h-12 mt-1">
+      {specialistLayout.length > 0 && (
+        <div className="relative h-12 mt-2">
           <svg viewBox="0 0 1000 48" preserveAspectRatio="none" className="w-full h-full">
-            {depth2Layout.map((item, i) => {
-              const childX = depth2Positions[i];
-              const meta = getWorkerMeta(item.worker.label, item.worker.type);
+            {specialistLayout.map((item, i) => {
+              const childX = specialistPositions[i];
+              const cfg = getTreeNodeConfig(item.specialist.id);
               return (
-                <g key={`wc${i}`}>
+                <g key={`sp-${item.specialist.id}-${i}`}>
                   <path d={`M ${item.parentX},0 L ${item.parentX},18 L ${childX},18 L ${childX},48`}
-                    stroke={meta.color} strokeOpacity={0.5} strokeWidth={1.2} fill="none" strokeDasharray="3,3" />
-                  {i < 6 && (
-                    <circle r={2.5} fill={meta.color} opacity={0.6}>
-                      <animateMotion dur={`${2 + i * 0.6}s`} repeatCount="indefinite"
-                        path={`M ${item.parentX},0 L ${item.parentX},18 L ${childX},18 L ${childX},48`} />
-                    </circle>
-                  )}
+                    stroke={cfg.color} strokeOpacity={0.5} strokeWidth={1.2} fill="none" strokeDasharray="3,3" />
                 </g>
               );
             })}
@@ -378,21 +496,62 @@ function TreeView({ mainSession, registeredAgents, workers, agents, onAgentClick
         </div>
       )}
 
-      {/* ── Depth 2: Workers ── */}
-      {depth2Layout.length > 0 && (
+      <div className="text-center mb-2 mt-1">
+        <span className="text-[9px] uppercase tracking-[2px] font-bold text-aegis-text-muted">Depth 2 — Specialists</span>
+      </div>
+      {specialistLayout.length === 0 ? (
+        <div className="text-center text-[11px] text-aegis-text-dim py-3">No Specialists detected.</div>
+      ) : (
+        <div className="flex justify-center gap-3 flex-wrap">
+          {specialistLayout.map(({ specialist }) => {
+            const cfg = getTreeNodeConfig(specialist.id);
+            const specialistSessions = workersByAgent[specialist.id] || [];
+            const isRunning = specialistSessions.some((s) => s.running) || runningSubAgents.some((sa) => sa.agentId === specialist.id);
+            const totalTok = specialistSessions.reduce((sum, s) => sum + s.totalTokens, 0);
+            return (
+              <div
+                key={specialist.id}
+                onClick={() => onAgentClick?.(specialist)}
+                className="relative rounded-xl border px-4 py-2.5 min-w-[210px] max-w-[260px] overflow-hidden transition-all hover:-translate-y-0.5 cursor-pointer"
+                style={{ background: `linear-gradient(135deg, ${cfg.color}10, ${cfg.color}04)`, borderColor: `${cfg.color}30` }}
+              >
+                <div className="absolute top-0 inset-x-0 h-[2px] opacity-30" style={{ background: `linear-gradient(90deg, transparent, ${cfg.color}, transparent)` }} />
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[14px] border"
+                    style={{ background: `linear-gradient(135deg, ${cfg.color}20, ${cfg.color}08)`, borderColor: `${cfg.color}30` }}>
+                    {cfg.icon}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[12px] font-bold truncate" style={{ color: cfg.color }}>{getHierarchyDisplayName(specialist)}</div>
+                    <div className="text-[9px] text-aegis-text-dim font-mono">{(specialist.model || specialistSessions[0]?.model || '—').toString().split('/').pop()}</div>
+                    <span className="flex items-center gap-1 text-[8px] mt-0.5 font-bold" style={{ color: isRunning ? cfg.color : 'rgb(var(--aegis-overlay) / 0.2)' }}>
+                      <StatusDot status={isRunning ? 'active' : 'idle'} size={5} glow={isRunning} />
+                      {isRunning ? 'Running' : 'Idle'}
+                    </span>
+                  </div>
+                  {totalTok > 0 && <div className="text-[9px] text-aegis-text-dim font-mono">{formatTokens(totalTok)}</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {workers.length > 0 && (
         <>
-          <div className="text-center mb-2">
-            <span className="text-[9px] uppercase tracking-[2px] font-bold text-aegis-text-muted">Depth 2 — Workers</span>
+          <div className="text-center mb-2 mt-4">
+            <span className="text-[9px] uppercase tracking-[2px] font-bold text-aegis-text-muted">Depth 1 — Runtime Workers (Task & Cron)</span>
           </div>
           <div className="flex justify-center gap-3 flex-wrap">
-            {depth2Layout.map(({ worker }) => {
+            {workers.slice(0, 18).map((worker) => {
               const meta = getWorkerMeta(worker.label, worker.type);
               return (
-                <div key={worker.key}
-                  className="relative rounded-xl border px-4 py-2.5 min-w-[170px] max-w-[200px] overflow-hidden transition-all hover:-translate-y-0.5"
-                  style={{ background: `linear-gradient(135deg, ${meta.color}10, ${meta.color}04)`, borderColor: `${meta.color}30` }}>
-                  <div className="absolute top-0 inset-x-0 h-[2px] opacity-30"
-                    style={{ background: `linear-gradient(90deg, transparent, ${meta.color}, transparent)` }} />
+                <div
+                  key={worker.key}
+                  className="relative rounded-xl border px-4 py-2.5 min-w-[200px] max-w-[250px] overflow-hidden transition-all hover:-translate-y-0.5"
+                  style={{ background: `linear-gradient(135deg, ${meta.color}10, ${meta.color}04)`, borderColor: `${meta.color}30` }}
+                >
+                  <div className="absolute top-0 inset-x-0 h-[2px] opacity-30" style={{ background: `linear-gradient(90deg, transparent, ${meta.color}, transparent)` }} />
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[14px] border"
                       style={{ background: `linear-gradient(135deg, ${meta.color}20, ${meta.color}08)`, borderColor: `${meta.color}30` }}>
@@ -400,11 +559,10 @@ function TreeView({ mainSession, registeredAgents, workers, agents, onAgentClick
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-[12px] font-bold truncate" style={{ color: meta.color }}>{worker.label}</div>
-                      <div className="text-[9px] text-aegis-text-dim font-mono">{worker.model.split('/').pop() || '—'}</div>
-                      <span className="flex items-center gap-1 text-[8px] mt-0.5 font-bold"
-                        style={{ color: worker.running ? meta.color : 'rgb(var(--aegis-overlay) / 0.2)' }}>
+                      <div className="text-[9px] text-aegis-text-dim font-mono">{worker.agentId}</div>
+                      <span className="flex items-center gap-1 text-[8px] mt-0.5 font-bold" style={{ color: worker.running ? meta.color : 'rgb(var(--aegis-overlay) / 0.2)' }}>
                         <StatusDot status={worker.running ? 'active' : 'idle'} size={5} glow={worker.running} />
-                        {worker.running ? 'Running' : 'Done'}
+                        {worker.running ? 'Running' : 'Idle'}
                       </span>
                     </div>
                   </div>
@@ -415,23 +573,11 @@ function TreeView({ mainSession, registeredAgents, workers, agents, onAgentClick
         </>
       )}
 
-      {/* ── Legend ── */}
       <div className="mt-8 flex items-center justify-center gap-5 flex-wrap px-4 py-3 rounded-xl bg-[rgb(var(--aegis-overlay)/0.02)] border border-[rgb(var(--aegis-overlay)/0.04)]">
-        <div className="flex items-center gap-1.5 text-[10px] text-aegis-text-muted"><div className="w-2.5 h-2.5 rounded-sm" style={{ background: mainColor() }} /> Main</div>
-        {registeredAgents.slice(0, 5).map(a => {
-          const cfg = getTreeNodeConfig(a.id);
-          return <div key={a.id} className="flex items-center gap-1.5 text-[10px] text-aegis-text-muted"><div className="w-2.5 h-2.5 rounded-sm" style={{ background: cfg.color }} /> {a.name || a.id}</div>;
-        })}
-        <div className="flex items-center gap-1.5 text-[10px] text-aegis-text-muted"><div className="w-2.5 h-2.5 rounded-sm" style={{ background: dataColor(2) }} /> Sub-agent</div>
-        <div className="flex items-center gap-1.5 text-[10px] text-aegis-text-muted"><div className="w-2.5 h-2.5 rounded-sm" style={{ background: dataColor(7) }} /> Cron</div>
-        <div className="flex items-center gap-1.5 text-[10px] text-aegis-text-dim ms-auto">
-          <svg width={20} height={8}><line x1={0} y1={4} x2={20} y2={4} stroke="rgb(var(--aegis-overlay) / 0.2)" strokeWidth={1} strokeDasharray="3,2" /></svg>
-          spawn
-        </div>
-        <div className="flex items-center gap-1.5 text-[10px] text-aegis-text-dim">
-          <svg width={12} height={12}><circle cx={6} cy={6} r={4} fill={mainColor()} opacity={0.5} /></svg>
-          data flow
-        </div>
+        <div className="flex items-center gap-1.5 text-[10px] text-aegis-text-muted"><div className="w-2.5 h-2.5 rounded-sm" style={{ background: mainColor() }} /> Controller</div>
+        <div className="flex items-center gap-1.5 text-[10px] text-aegis-text-muted"><div className="w-2.5 h-2.5 rounded-sm" style={{ background: orchestratorColor }} /> Orchestrator</div>
+        <div className="flex items-center gap-1.5 text-[10px] text-aegis-text-muted"><div className="w-2.5 h-2.5 rounded-sm" style={{ background: dataColor(4) }} /> Specialists</div>
+        <div className="flex items-center gap-1.5 text-[10px] text-aegis-text-muted"><div className="w-2.5 h-2.5 rounded-sm" style={{ background: dataColor(2) }} /> Workers</div>
       </div>
     </div>
   );
@@ -457,9 +603,11 @@ function ActivityFeed({ sessions, agents }: { sessions: SessionInfo[]; agents: A
         let text = '';
         if (s.running && s.type === 'subagent') text = `spawned ${s.label}`;
         else if (s.running && s.type === 'cron') text = `cron running: ${s.label}`;
+        else if (s.running && s.type === 'task') text = `task running: ${s.label}`;
         else if (s.running && s.type === 'main') text = 'active session';
         else if (s.type === 'subagent') text = `completed ${s.label} (${formatTokens(s.totalTokens)} tokens)`;
         else if (s.type === 'cron') text = `cron finished: ${s.label}`;
+        else if (s.type === 'task') text = `task finished: ${s.label}`;
         else text = `session active (${formatTokens(s.totalTokens)} tokens)`;
 
         return {
@@ -516,10 +664,12 @@ export function AgentHubPage() {
   const { connected } = useChatStore();
   const rawSessions = useGatewayDataStore((s) => s.sessions);
   const agents = useGatewayDataStore((s) => s.agents) as AgentInfo[];
+  const cronJobs = useGatewayDataStore((s) => s.cronJobs) as any[];
   const runningSubAgents = useGatewayDataStore((s) => s.runningSubAgents);
   const loading = useGatewayDataStore((s) => s.loading.sessions || s.loading.agents);
 
   const sessions = useMemo(() => parseSessions(rawSessions as any[]), [rawSessions]);
+  const initialLoading = loading && sessions.length === 0 && agents.length === 0;
 
   const [viewMode, setViewMode] = useState<ViewMode>('tree');
   const [expandedWorker, setExpandedWorker] = useState<string | null>(null);
@@ -529,6 +679,9 @@ export function AgentHubPage() {
   const [deletingAgentId, setDeletingAgentId] = useState<string | null>(null);
   const [newAgent, setNewAgent] = useState({ id: '', name: '', model: '', workspace: '' });
   const [settingsAgent, setSettingsAgent] = useState<AgentInfo | null>(null);
+  const [collapseL2, setCollapseL2] = useState(false);
+  const [collapseL3, setCollapseL3] = useState(false);
+  const [collapseOther, setCollapseOther] = useState(true);
 
   // ── Stable model map from config.get (agents.list never returns models) ──
   // Stored in local state so polling refreshes of agents.list can't overwrite it.
@@ -554,10 +707,16 @@ export function AgentHubPage() {
   }, [connected]);
 
   // Enrich agents with model data from config (merge at render time, not in store)
-  const enrichedAgents = useMemo(() =>
-    agents.map(a => agentModels[a.id] ? { ...a, model: agentModels[a.id] } : a),
-    [agents, agentModels]
-  );
+  const enrichedAgents = useMemo(() => {
+    const map = new Map<string, AgentInfo>();
+    for (const raw of agents) {
+      const id = typeof raw?.id === 'string' ? raw.id.trim() : '';
+      if (!id) continue;
+      const merged = agentModels[id] ? { ...raw, id, model: agentModels[id] } : { ...raw, id };
+      map.set(id, { ...merged, name: getHierarchyDisplayName(merged) });
+    }
+    return Array.from(map.values());
+  }, [agents, agentModels]);
 
   const handleCreateAgent = async () => {
     if (!newAgent.id.trim()) return;
@@ -581,8 +740,46 @@ export function AgentHubPage() {
 
   // ── Derived data ──
   const mainSession = sessions.find(s => s.agentId === 'main' && s.type === 'main');
-  const workers = sessions.filter(s => s !== mainSession && (s.type === 'cron' || s.type === 'subagent'));
-  const registeredAgents = enrichedAgents.filter(a => a.id !== 'main');
+  const sessionWorkers = sessions.filter(s => s !== mainSession && (s.type === 'cron' || s.type === 'subagent' || s.type === 'task'));
+  const cronWorkers = useMemo(() => buildCronWorkerSessions(cronJobs), [cronJobs]);
+  const workers = useMemo(() => {
+    const merged = new Map<string, SessionInfo>();
+    for (const worker of [...cronWorkers, ...sessionWorkers]) {
+      const key = canonicalWorkerKey(worker);
+      const existing = merged.get(key);
+      if (!existing) {
+        merged.set(key, worker);
+        continue;
+      }
+      // Preference order:
+      // 1) running worker
+      // 2) non-fallback key (live session beats cronjob synthetic snapshot)
+      // 3) newer updatedAt
+      const currentIsFallback = existing.key.startsWith('cronjob:');
+      const nextIsFallback = worker.key.startsWith('cronjob:');
+      const shouldReplace =
+        (!!worker.running && !existing.running)
+        || (currentIsFallback && !nextIsFallback)
+        || ((worker.updatedAt || 0) > (existing.updatedAt || 0));
+      if (shouldReplace) {
+        merged.set(key, worker);
+      }
+    }
+    return Array.from(merged.values()).sort((a, b) => {
+      if (a.running && !b.running) return -1;
+      if (!a.running && b.running) return 1;
+      return (b.updatedAt || 0) - (a.updatedAt || 0);
+    });
+  }, [cronWorkers, sessionWorkers]);
+  const controllerAgent = enrichedAgents.find((a) => getAgentRole(a) === 'controller');
+  const courseOrchestrators = enrichedAgents.filter((a) => getAgentRole(a) === 'courseOrchestrator');
+  const specialists = enrichedAgents.filter((a) => getAgentRole(a) === 'courseSpecialist');
+  const otherAgents = enrichedAgents.filter((a) => getAgentRole(a) === 'other');
+  const registeredAgents = [...courseOrchestrators, ...specialists, ...otherAgents];
+  const specialistsByOrchestrator = useMemo(
+    () => mapSpecialistsToOrchestrator(specialists, courseOrchestrators),
+    [specialists, courseOrchestrators],
+  );
   const getAgentSessions = (agentId: string) => sessions.filter(s => s.agentId === agentId && s.type !== 'main');
 
   // Check if an agent has a running sub-agent (from real-time tool stream tracking)
@@ -689,6 +886,83 @@ export function AgentHubPage() {
     );
   };
 
+  const renderRegisteredAgentCard = (agent: AgentInfo, i: number) => {
+    const role = getAgentRole(agent);
+    const display = getAgentDisplay(agent);
+    const agentSessions = getAgentSessions(agent.id);
+    const activeSessions = agentSessions.filter((s) => s.running);
+    const totalTokens = agentSessions.reduce((sum, s) => sum + s.totalTokens, 0);
+    const lastActive = agentSessions.length > 0 ? Math.max(...agentSessions.map((s) => s.updatedAt)) : 0;
+    const spawned = isAgentSpawned(agent.id);
+    const spawnedLabel = getSpawnedLabel(agent.id);
+    const isRunning = activeSessions.length > 0 || spawned;
+
+    return (
+      <div key={agent.id}>
+        <GlassCard delay={i * 0.05} hover shimmer={isRunning}>
+          <div className="flex items-start gap-4">
+            <div className="w-[48px] h-[48px] rounded-xl flex items-center justify-center shrink-0 border relative"
+              style={{ background: `linear-gradient(135deg, ${display.color}20, ${display.color}05)`, borderColor: isRunning ? `${display.color}40` : `${display.color}25`, color: display.color }}>
+              {display.icon}
+              {isRunning && <div className="absolute -bottom-[2px] -right-[2px]"><StatusDot status="active" size={10} glow beacon /></div>}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[14px] font-bold text-aegis-text">{agent.name || agent.id}</div>
+              <div className="text-[10px] text-aegis-text-dim font-mono mt-0.5">
+                {(agent.model || '').toString().split('/').pop() || display.description}
+              </div>
+              <div className="mt-1">
+                <span
+                  className="text-[9px] px-1.5 py-[1px] rounded font-bold uppercase tracking-wider"
+                  style={role === 'courseOrchestrator'
+                    ? { background: themeAlpha('accent', 0.12), color: themeHex('accent') }
+                    : role === 'courseSpecialist'
+                      ? { background: themeAlpha('primary', 0.12), color: themeHex('primary') }
+                      : { background: 'rgb(var(--aegis-overlay)/0.05)', color: 'rgb(var(--aegis-text-dim))' }}
+                >
+                  {role === 'courseOrchestrator' ? 'L2 Orchestrator' : role === 'courseSpecialist' ? 'L3 Specialist' : 'Agent'}
+                </span>
+              </div>
+              <div className="flex items-center gap-3 mt-2 text-[10px] text-aegis-text-muted">
+                {isRunning ? (
+                  <span className="flex items-center gap-1 text-aegis-primary">
+                    <Loader2 size={9} className="animate-spin" />
+                    {activeSessions.length > 0 ? `${activeSessions.length} running` : 'Working…'}
+                  </span>
+                ) : <span className="text-aegis-text-dim">Idle</span>}
+                {totalTokens > 0 && <><span className="text-aegis-text-dim">·</span><span>{formatTokens(totalTokens)} tokens</span></>}
+                {lastActive > 0 && <><span className="text-aegis-text-dim">·</span><span>{timeAgo(lastActive)}</span></>}
+              </div>
+              {spawned && spawnedLabel && (
+                <div className="mt-1.5 text-[9px] text-aegis-primary/70 truncate max-w-[200px]" title={spawnedLabel}>
+                  📋 {spawnedLabel}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <div className="px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider border"
+                style={{
+                  background: isRunning ? themeAlpha('primary', 0.12) : agent.configured ? `${display.color}10` : 'rgb(var(--aegis-overlay) / 0.03)',
+                  color: isRunning ? themeHex('primary') : agent.configured ? display.color : 'rgb(var(--aegis-overlay) / 0.2)',
+                  borderColor: isRunning ? themeAlpha('primary', 0.25) : agent.configured ? `${display.color}20` : 'rgb(var(--aegis-overlay) / 0.06)',
+                }}>
+                {isRunning ? 'ACTIVE' : agent.configured ? 'READY' : 'SETUP'}
+              </div>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              <button onClick={(e) => { e.stopPropagation(); setSettingsAgent(agent); }}
+                className="p-1.5 rounded-lg bg-[rgb(var(--aegis-overlay)/0.04)] border border-[rgb(var(--aegis-overlay)/0.08)] text-aegis-text-muted hover:text-aegis-primary hover:border-aegis-primary/30 transition-colors"><Settings2 size={13} /></button>
+              <button onClick={(e) => { e.stopPropagation(); handleDeleteAgent(agent.id); }}
+                className={clsx('p-1.5 rounded-lg transition-colors', deletingAgentId === agent.id ? 'text-red-400 bg-red-500/10 border border-red-400/30' : 'text-aegis-text-muted hover:text-red-400 bg-[rgb(var(--aegis-overlay)/0.04)] border border-[rgb(var(--aegis-overlay)/0.08)]')}>
+                {deletingAgentId === agent.id ? <span className="text-[10px] font-bold">Confirm?</span> : <Trash2 size={13} />}
+              </button>
+            </div>
+          </div>
+        </GlassCard>
+      </div>
+    );
+  };
+
   return (
     <PageTransition className="p-6 space-y-6 max-w-[1200px] mx-auto">
 
@@ -724,7 +998,7 @@ export function AgentHubPage() {
         </div>
       </div>
 
-      {loading ? (
+      {initialLoading ? (
         <div className="flex items-center justify-center py-20"><Loader2 size={24} className="animate-spin text-aegis-primary" /></div>
       ) : (
         <>
@@ -732,7 +1006,14 @@ export function AgentHubPage() {
           {/* TREE VIEW                                     */}
           {/* ══════════════════════════════════════════════ */}
           {viewMode === 'tree' && (
-            <TreeView mainSession={mainSession} registeredAgents={registeredAgents} workers={workers} agents={enrichedAgents} onAgentClick={(a) => setSettingsAgent(a)} />
+            <TreeView
+              mainSession={mainSession}
+              controllerAgent={controllerAgent}
+              courseOrchestrators={courseOrchestrators}
+              specialistsByOrchestrator={specialistsByOrchestrator}
+              workers={workers}
+              onAgentClick={(a) => setSettingsAgent(a)}
+            />
           )}
 
           {/* ══════════════════════════════════════════════ */}
@@ -752,7 +1033,9 @@ export function AgentHubPage() {
             <div className="space-y-8">
               {/* Section 1: Main Agent Hero */}
               <div>
-                <div className="text-[11px] text-aegis-text-muted uppercase tracking-wider font-semibold mb-3">{t('agents.mainAgent', 'Main Agent')}</div>
+                <div className="text-[11px] text-aegis-text-muted uppercase tracking-wider font-semibold mb-3">
+                  {t('agents.mainAgent', 'OpenClaw Controller Agent')}
+                </div>
                 {mainSession ? (
                   <GlassCard delay={0} hover shimmer={mainSession.running}>
                     <div className="flex items-center gap-5">
@@ -762,7 +1045,7 @@ export function AgentHubPage() {
                         <div className="absolute -bottom-[3px] -right-[3px]"><StatusDot status="active" size={14} glow beacon={mainSession.running} /></div>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-[18px] font-extrabold text-aegis-text">{enrichedAgents.find(a => a.id === 'main')?.name || 'Main Agent'}</div>
+                        <div className="text-[18px] font-extrabold text-aegis-text">{enrichedAgents.find(a => a.id === 'main')?.name || 'OpenClaw Controller Agent'}</div>
                         <div className="text-[11px] text-aegis-text-muted font-mono mt-0.5">{mainSession.model.split('/').pop() || '—'}</div>
                         <div className="text-[10px] text-aegis-text-dim mt-1">{t('agents.lastActive', 'Last active')}: {timeAgo(mainSession.updatedAt)}</div>
                       </div>
@@ -785,7 +1068,7 @@ export function AgentHubPage() {
                         style={{ background: `linear-gradient(135deg, ${mainColor()}10, ${mainColor()}04)`, borderColor: `${mainColor()}15`, color: `${mainColor()}50` }}>
                         Æ<div className="absolute -bottom-[3px] -right-[3px]"><StatusDot status="sleeping" size={14} /></div>
                       </div>
-                      <div className="flex-1"><div className="text-[18px] font-extrabold text-aegis-text-muted">{enrichedAgents.find(a => a.id === 'main')?.name || 'Main Agent'}</div><div className="text-[11px] text-aegis-text-dim mt-0.5">{t('agents.notConnected', 'Not connected')}</div></div>
+                      <div className="flex-1"><div className="text-[18px] font-extrabold text-aegis-text-muted">{enrichedAgents.find(a => a.id === 'main')?.name || 'OpenClaw Controller Agent'}</div><div className="text-[11px] text-aegis-text-dim mt-0.5">{t('agents.notConnected', 'Not connected')}</div></div>
                       <div className="px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border bg-[rgb(var(--aegis-overlay)/0.04)] text-aegis-text-muted border-[rgb(var(--aegis-overlay)/0.08)]">OFFLINE</div>
                     </div>
                   </GlassCard>
@@ -797,7 +1080,11 @@ export function AgentHubPage() {
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <div className="text-[11px] text-aegis-text-muted uppercase tracking-wider font-semibold">
-                      {t('agents.registeredAgents', 'Registered Agents')}<span className="text-aegis-text-dim ms-2">— {registeredAgents.length}</span>
+                      {t('agents.registeredAgents', 'Registered Agents')}
+                      <span className="text-aegis-text-dim ms-2">— {registeredAgents.length}</span>
+                      <span className="text-aegis-text-dim ms-2">
+                        (L2 Orchestrators: {courseOrchestrators.length} · L3 Specialists: {specialists.length})
+                      </span>
                     </div>
                     <button onClick={() => setShowAddForm(!showAddForm)}
                       className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-aegis-primary/10 border border-aegis-primary/25 text-aegis-primary text-[10px] font-semibold hover:bg-aegis-primary/20 transition-colors">
@@ -828,71 +1115,99 @@ export function AgentHubPage() {
                     )}
                   </AnimatePresence>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {registeredAgents.map((agent, i) => {
-                      const display = getAgentDisplay(agent);
-                      const agentSessions = getAgentSessions(agent.id);
-                      const activeSessions = agentSessions.filter(s => s.running);
-                      const totalTokens = agentSessions.reduce((sum, s) => sum + s.totalTokens, 0);
-                      const lastActive = agentSessions.length > 0 ? Math.max(...agentSessions.map(s => s.updatedAt)) : 0;
-                      const spawned = isAgentSpawned(agent.id);
-                      const spawnedLabel = getSpawnedLabel(agent.id);
-                      const isRunning = activeSessions.length > 0 || spawned;
+                  <div className="space-y-3">
+                    {courseOrchestrators.length > 0 && (
+                      <div className="rounded-xl border border-[rgb(var(--aegis-overlay)/0.06)] bg-[rgb(var(--aegis-overlay)/0.02)]">
+                        <button
+                          onClick={() => setCollapseL2((v) => !v)}
+                          className="w-full flex items-center justify-between px-3 py-2.5 text-left"
+                        >
+                          <div className="flex items-center gap-2 text-[11px] font-semibold text-aegis-text-secondary uppercase tracking-wider">
+                            {collapseL2 ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                            L2 — Course Orchestrators
+                          </div>
+                          <span className="text-[10px] text-aegis-text-dim">{courseOrchestrators.length}</span>
+                        </button>
+                        <AnimatePresence initial={false}>
+                          {!collapseL2 && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="p-2 pt-0">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                  {courseOrchestrators.map((agent, i) => renderRegisteredAgentCard(agent, i))}
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    )}
 
-                      return (
-                        <div key={agent.id}>
-                          <GlassCard delay={i * 0.05} hover shimmer={isRunning}>
-                            <div className="flex items-start gap-4">
-                              <div className="w-[48px] h-[48px] rounded-xl flex items-center justify-center shrink-0 border relative"
-                                style={{ background: `linear-gradient(135deg, ${display.color}20, ${display.color}05)`, borderColor: isRunning ? `${display.color}40` : `${display.color}25`, color: display.color }}>
-                                {display.icon}
-                                {isRunning && <div className="absolute -bottom-[2px] -right-[2px]"><StatusDot status="active" size={10} glow beacon /></div>}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="text-[14px] font-bold text-aegis-text">{agent.name || agent.id}</div>
-                                <div className="text-[10px] text-aegis-text-dim font-mono mt-0.5">
-                                  {(agent.model || '').toString().split('/').pop() || display.description}
-                                </div>
-                                <div className="flex items-center gap-3 mt-2 text-[10px] text-aegis-text-muted">
-                                  {isRunning ? (
-                                    <span className="flex items-center gap-1 text-aegis-primary">
-                                      <Loader2 size={9} className="animate-spin" />
-                                      {activeSessions.length > 0 ? `${activeSessions.length} running` : 'Working…'}
-                                    </span>
-                                  ) : <span className="text-aegis-text-dim">Idle</span>}
-                                  {totalTokens > 0 && <><span className="text-aegis-text-dim">·</span><span>{formatTokens(totalTokens)} tokens</span></>}
-                                  {lastActive > 0 && <><span className="text-aegis-text-dim">·</span><span>{timeAgo(lastActive)}</span></>}
-                                </div>
-                                {/* Task label when spawned */}
-                                {spawned && spawnedLabel && (
-                                  <div className="mt-1.5 text-[9px] text-aegis-primary/70 truncate max-w-[200px]" title={spawnedLabel}>
-                                    📋 {spawnedLabel}
-                                  </div>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <div className="px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider border"
-                                  style={{
-                                    background: isRunning ? themeAlpha('primary', 0.12) : agent.configured ? `${display.color}10` : 'rgb(var(--aegis-overlay) / 0.03)',
-                                    color: isRunning ? themeHex('primary') : agent.configured ? display.color : 'rgb(var(--aegis-overlay) / 0.2)',
-                                    borderColor: isRunning ? themeAlpha('primary', 0.25) : agent.configured ? `${display.color}20` : 'rgb(var(--aegis-overlay) / 0.06)',
-                                  }}>
-                                  {isRunning ? 'ACTIVE' : agent.configured ? 'READY' : 'SETUP'}
+                    {specialists.length > 0 && (
+                      <div className="rounded-xl border border-[rgb(var(--aegis-overlay)/0.06)] bg-[rgb(var(--aegis-overlay)/0.02)]">
+                        <button
+                          onClick={() => setCollapseL3((v) => !v)}
+                          className="w-full flex items-center justify-between px-3 py-2.5 text-left"
+                        >
+                          <div className="flex items-center gap-2 text-[11px] font-semibold text-aegis-text-secondary uppercase tracking-wider">
+                            {collapseL3 ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                            L3 — Specialists
+                          </div>
+                          <span className="text-[10px] text-aegis-text-dim">{specialists.length}</span>
+                        </button>
+                        <AnimatePresence initial={false}>
+                          {!collapseL3 && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="p-2 pt-0">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                  {specialists.map((agent, i) => renderRegisteredAgentCard(agent, i + courseOrchestrators.length))}
                                 </div>
                               </div>
-                              <div className="flex items-center gap-1 shrink-0">
-                                <button onClick={(e) => { e.stopPropagation(); setSettingsAgent(agent); }}
-                                  className="p-1.5 rounded-lg bg-[rgb(var(--aegis-overlay)/0.04)] border border-[rgb(var(--aegis-overlay)/0.08)] text-aegis-text-muted hover:text-aegis-primary hover:border-aegis-primary/30 transition-colors"><Settings2 size={13} /></button>
-                                <button onClick={(e) => { e.stopPropagation(); handleDeleteAgent(agent.id); }}
-                                  className={clsx('p-1.5 rounded-lg transition-colors', deletingAgentId === agent.id ? 'text-red-400 bg-red-500/10 border border-red-400/30' : 'text-aegis-text-muted hover:text-red-400 bg-[rgb(var(--aegis-overlay)/0.04)] border border-[rgb(var(--aegis-overlay)/0.08)]')}>
-                                  {deletingAgentId === agent.id ? <span className="text-[10px] font-bold">Confirm?</span> : <Trash2 size={13} />}
-                                </button>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    )}
+
+                    {otherAgents.length > 0 && (
+                      <div className="rounded-xl border border-[rgb(var(--aegis-overlay)/0.06)] bg-[rgb(var(--aegis-overlay)/0.02)]">
+                        <button
+                          onClick={() => setCollapseOther((v) => !v)}
+                          className="w-full flex items-center justify-between px-3 py-2.5 text-left"
+                        >
+                          <div className="flex items-center gap-2 text-[11px] font-semibold text-aegis-text-secondary uppercase tracking-wider">
+                            {collapseOther ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                            Other Agents
+                          </div>
+                          <span className="text-[10px] text-aegis-text-dim">{otherAgents.length}</span>
+                        </button>
+                        <AnimatePresence initial={false}>
+                          {!collapseOther && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="p-2 pt-0">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                  {otherAgents.map((agent, i) => renderRegisteredAgentCard(agent, i + courseOrchestrators.length + specialists.length))}
+                                </div>
                               </div>
-                            </div>
-                          </GlassCard>
-                        </div>
-                      );
-                    })}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

@@ -117,8 +117,8 @@ export function ChatView() {
     /^node scripts\/build/, /^npx electron/, /^Ctrl\+[A-Z]/,
     // Desktop-injected metadata blocks
     /^Conversation info \(untrusted metadata\)/i,
-    /^\[AEGIS_DESKTOP_CONTEXT\]/i,
-    /^\[AEGIS:RASHID\]/i,
+    /^\[[A-Z]+_DESKTOP_CONTEXT\]/i,
+    /^\[OntoSynth:RASHID\]/i,
   ];
 
   const isNoise = (text: string): boolean => {
@@ -130,13 +130,13 @@ export function ChatView() {
   // Strip injected metadata from user messages for clean display
   const stripUserMeta = (text: string): string => {
     let clean = text;
-    // Remove [AEGIS_DESKTOP_CONTEXT]...[/AEGIS_DESKTOP_CONTEXT] block
-    clean = clean.replace(/\[AEGIS_DESKTOP_CONTEXT\][\s\S]*?\[\/AEGIS_DESKTOP_CONTEXT\]\s*/i, '');
+    // Remove Desktop context block (supports legacy + current brand tags)
+    clean = clean.replace(/\[[A-Z]+_DESKTOP_CONTEXT\][\s\S]*?\[\/[A-Z]+_DESKTOP_CONTEXT\]\s*/i, '');
     // Remove Conversation info JSON block
     clean = clean.replace(/Conversation info \(untrusted metadata\):\s*```json\s*\{[\s\S]*?\}\s*```\s*/i, '');
     // Remove System notification blocks (exec completed, compaction audit, etc.)
     // Greedy match until the next recognized user block (timestamp, Conversation info, Desktop context) or end
-    clean = clean.replace(/System:\s*\[[\s\S]*?(?=\n\nConversation info|\n\n\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)|\n\n\[AEGIS_DESKTOP|\s*$)/g, '');
+    clean = clean.replace(/System:\s*\[[\s\S]*?(?=\n\nConversation info|\n\n\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)|\n\n\[[A-Z]+_DESKTOP|\s*$)/g, '');
     // Remove inline [Sat 2026-...] timestamp prefixes
     clean = clean.replace(/^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+UTC\]\s*/i, '');
     return clean.trim();

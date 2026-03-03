@@ -1,4 +1,4 @@
-# Contributing to AEGIS Desktop
+# Contributing to OntoSynth Desktop
 
 Thank you for your interest in contributing! Here's how to get started.
 

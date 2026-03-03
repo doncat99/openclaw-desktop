@@ -2,6 +2,7 @@ import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import ar from './locales/ar.json';
 import en from './locales/en.json';
+import { getStorageItem, setStorageItem, storageKey } from '@/utils/storage';
 
 // ═══════════════════════════════════════════════════════════
 // i18n — Internationalization (Arabic + English)
@@ -13,29 +14,31 @@ import en from './locales/en.json';
 //   3. First run (dev/no installer): system language
 //   4. Fallback: 'en'
 const getInitialLang = (): string => {
-  const stored = localStorage.getItem('aegis-language');
+  const languageStorageKey = storageKey('language');
+  const installedVersionStorageKey = storageKey('installed-version');
+  const stored = getStorageItem(languageStorageKey);
   const installerLang = (window as any).aegis?.installerLanguage as string | null;
   const currentVersion = (window as any).__APP_VERSION__ || '';
-  const lastVersion = localStorage.getItem('aegis-installed-version');
+  const lastVersion = getStorageItem(installedVersionStorageKey);
 
   // New install or upgrade: installer language takes priority
   // (The NSIS wizard asks the user every time — respect that choice)
   if (installerLang && (installerLang === 'ar' || installerLang === 'en') && lastVersion !== currentVersion) {
-    localStorage.setItem('aegis-language', installerLang);
-    localStorage.setItem('aegis-installed-version', currentVersion);
+    setStorageItem(languageStorageKey, installerLang);
+    setStorageItem(installedVersionStorageKey, currentVersion);
     return installerLang;
   }
 
   // Normal run: use saved preference
   if (stored === 'ar' || stored === 'en') {
     // Sync version marker if missing
-    if (!lastVersion && currentVersion) localStorage.setItem('aegis-installed-version', currentVersion);
+    if (!lastVersion && currentVersion) setStorageItem(installedVersionStorageKey, currentVersion);
     return stored;
   }
 
   // Default: English (user can switch to Arabic from Settings)
-  localStorage.setItem('aegis-language', 'en');
-  if (currentVersion) localStorage.setItem('aegis-installed-version', currentVersion);
+  setStorageItem(languageStorageKey, 'en');
+  if (currentVersion) setStorageItem(installedVersionStorageKey, currentVersion);
   return 'en';
 };
 
@@ -59,7 +62,7 @@ export const getDirection = (lang?: string): 'rtl' | 'ltr' => {
 // Helper: change language and persist
 export const changeLanguage = (lang: string) => {
   i18n.changeLanguage(lang);
-  localStorage.setItem('aegis-language', lang);
+  setStorageItem(storageKey('language'), lang);
   document.documentElement.dir = getDirection(lang);
   document.documentElement.lang = lang;
 };

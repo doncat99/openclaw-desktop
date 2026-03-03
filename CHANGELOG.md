@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to AEGIS Desktop are documented here.
+All notable changes to OntoSynth Desktop are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 

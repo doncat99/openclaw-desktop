@@ -15,7 +15,7 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { getDirection } from '@/i18n';
 
 /** Pages that work without Gateway connection */
-const OFFLINE_PAGES = ['/settings', '/terminal'];
+const OFFLINE_PAGES = ['/settings', '/terminal', '/assignments', '/task-rpg'];
 
 export function AppLayout() {
   const { language } = useSettingsStore();

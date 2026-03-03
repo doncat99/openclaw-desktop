@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Download, Maximize2, X, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
 import clsx from 'clsx';
+import { getStorageItem, storageKey } from '@/utils/storage';
 
 // ═══════════════════════════════════════════════════════════
 // ChatImage — Image display with save, zoom, and lightbox
@@ -34,7 +35,7 @@ function resolveImageSrc(src: string): string {
   // Relative gateway media path (e.g., /media/xxx.png)
   if (src.startsWith('/media/') || src.startsWith('/v1/media/')) {
     // Resolve against gateway URL (read from config, fallback to localhost)
-    const gwUrl = localStorage.getItem('aegis-gateway-http') || 'http://127.0.0.1:18789';
+    const gwUrl = getStorageItem(storageKey('gateway-http')) || 'http://127.0.0.1:18789';
     return `${gwUrl}${src}`;
   }
 

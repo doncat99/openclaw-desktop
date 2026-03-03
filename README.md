@@ -1,6 +1,6 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/openclaw/openclaw/main/ui/public/apple-touch-icon.png" width="96" alt="OpenClaw" />
-  <h1>AEGIS Desktop</h1>
+  <h1>OntoSynth Desktop</h1>
   <p><strong>The desktop client that turns your OpenClaw Gateway into a full mission control center.</strong></p>
 </div>
 
@@ -14,9 +14,9 @@
 
 ---
 
-## 🤔 Why AEGIS Desktop?
+## 🤔 Why OntoSynth Desktop?
 
-OpenClaw is powerful — but managing it through a terminal or basic webchat leaves a lot on the table. AEGIS Desktop gives it a proper home:
+OpenClaw is powerful — but managing it through a terminal or basic webchat leaves a lot on the table. OntoSynth Desktop gives it a proper home:
 
 - 💬 **Chat** — streaming responses, artifacts, images, voice, and multi-tab sessions
 - 🔘 **Smart Quick Replies** — clickable buttons when the AI needs your decision
@@ -26,7 +26,7 @@ OpenClaw is powerful — but managing it through a terminal or basic webchat lea
 - 🔧 **Skills & Terminal** — browse the marketplace and run shell commands without leaving the app
 - 🌍 **Bilingual** — full Arabic (RTL) and English (LTR) support out of the box
 
-If you run OpenClaw, AEGIS Desktop is the UI it deserves.
+If you run OpenClaw, OntoSynth Desktop is the UI it deserves.
 
 ---
 
@@ -90,28 +90,107 @@ Download from [Releases](../../releases):
 
 | File | Type |
 |------|------|
-| `AEGIS-Desktop-Setup-X.X.X.exe` | Windows installer |
-| `AEGIS-Desktop-X.X.X.exe` | Portable (no install) |
+| `OntoSynth-Desktop-Setup-X.X.X.exe` | Windows installer |
+| `OntoSynth-Desktop-X.X.X.exe` | Portable (no install) |
+| `OntoSynth-Desktop-X.X.X.dmg` | macOS installer image |
+| `OntoSynth-Desktop-X.X.X-mac.zip` | macOS zip build |
+| `OntoSynth-Desktop-X.X.X.AppImage` | Linux portable app |
+| `OntoSynth-Desktop-X.X.X.deb` | Linux Debian package |
+| `OntoSynth-Desktop-X.X.X-linux.tar.gz` | Linux archive |
 
-### Requirements
+### Runtime Requirements
 
+- macOS 12+
 - Windows 10/11
+- Linux x64/arm64 (glibc-based distros recommended)
 - [OpenClaw](https://github.com/openclaw/openclaw) Gateway running locally or remotely
 
 On first launch, you'll pair with your Gateway — a one-time setup using Ed25519 device authentication.
+
+### Launch Downloaded Builds
+
+macOS (`.dmg` / `.zip`):
+- Drag `OntoSynth Desktop.app` to `Applications`, then open it.
+- If Gatekeeper blocks it: `xattr -dr com.apple.quarantine "/Applications/OntoSynth Desktop.app"`
+
+Windows (`Setup.exe` / portable `.exe`):
+- Installer: run `OntoSynth-Desktop-Setup-X.X.X.exe`
+- Portable: run `OntoSynth-Desktop-X.X.X.exe`
+
+Linux (`.AppImage` / `.deb`):
+- AppImage:
+  - `chmod +x OntoSynth-Desktop-X.X.X.AppImage`
+  - `./OntoSynth-Desktop-X.X.X.AppImage`
+- Debian/Ubuntu package:
+  - `sudo apt install ./OntoSynth-Desktop-X.X.X.deb`
+
+---
+
+## ▶️ Run From Source (macOS / Windows / Linux)
+
+### 1) Install prerequisites
+
+- Node.js 20 LTS + npm
+- Git
+- Build tools for `node-pty` (native module):
+
+macOS:
+- Xcode Command Line Tools: `xcode-select --install`
+
+Windows:
+- Visual Studio Build Tools (Desktop C++ workload)
+- Python 3 (used by `node-gyp`)
+
+Linux (Debian/Ubuntu):
+- `sudo apt update && sudo apt install -y build-essential python3 make g++`
+
+### 2) Clone and install
+
+```bash
+git clone <your-repo-url>
+cd openclaw-desktop
+npm install
+```
+
+If you use `pnpm` instead of `npm`:
+
+```bash
+pnpm install
+pnpm approve-builds
+```
+
+Approve at least: `electron`, `esbuild`, and `node-pty`.
+
+If you switch package managers (npm ↔ pnpm), remove `node_modules` first to avoid broken links.
+
+### 3) Start app in development mode
+
+```bash
+npm run dev
+```
+
+This launches:
+- Vite renderer on `http://localhost:5173`
+- Electron desktop shell with hot reload
+
+Browser-only mode (without Electron):
+
+```bash
+npm run dev:web
+```
 
 ---
 
 ## 🔌 How It Works
 
-AEGIS Desktop is a frontend client — it doesn't run AI or store data. Everything lives in your OpenClaw Gateway.
+OntoSynth Desktop is a frontend client — it doesn't run AI or store data. Everything lives in your OpenClaw Gateway.
 
 ```
 OpenClaw Gateway (local or remote)
         │
         │  WebSocket
         ▼
-  AEGIS Desktop
+  OntoSynth Desktop
   ├── Chat       ← messages + streaming responses
   ├── Dashboard  ← sessions, cost, agent status
   ├── Analytics  ← cost summary + token history
@@ -123,16 +202,26 @@ OpenClaw Gateway (local or remote)
 
 ---
 
-## 🛠️ Development
+## 🛠️ Build & Package
 
 ```bash
 npm install
 npm run dev              # Electron + Vite (hot reload)
 npm run dev:web          # Browser only (no Electron)
 npm run build            # Production build
-npm run package          # NSIS installer
+npm run package          # Alias of package:win
+npm run package:win      # Windows NSIS installer
 npm run package:portable # Portable exe
+npm run package:mac      # macOS dmg + zip
+npm run package:linux    # Linux AppImage + deb + tar.gz
+npm run package:all      # Build all targets (best on CI/matrix)
 ```
+
+Output files are generated in `release/`.
+
+Packaging notes:
+- Build each OS target on the same OS whenever possible (macOS on macOS, Windows on Windows, Linux on Linux).
+- macOS signing/notarization is optional for local testing; use signing identities for production distribution.
 
 ---
 

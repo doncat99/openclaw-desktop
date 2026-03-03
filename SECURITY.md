@@ -18,4 +18,4 @@ You can expect:
 - A fix or mitigation within **90 days**, depending on severity
 - Credit in the release notes if you'd like
 
-Thank you for helping keep AEGIS Desktop safe.
+Thank you for helping keep OntoSynth Desktop safe.

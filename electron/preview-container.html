@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AEGIS Preview</title>
+  <title>OntoSynth Preview</title>
   <style>
     /* ═══════════════════════════════════════════════════════════
-       AEGIS Preview Window — Preview + Code Tabs
+       OntoSynth Preview Window — Preview + Code Tabs
        ═══════════════════════════════════════════════════════════ */
     :root {
       --bg-primary: #0d1117;
@@ -388,7 +388,7 @@
   <!-- ── Header ── -->
   <div class="header">
     <span class="type-badge" id="type-badge">—</span>
-    <span class="title" id="title">AEGIS Preview</span>
+    <span class="title" id="title">OntoSynth Preview</span>
     <button class="header-btn" id="refresh-btn" onclick="handleRefresh()">↻ Refresh</button>
   </div>
 
@@ -502,7 +502,7 @@
       // Update header
       document.getElementById('type-badge').textContent = type.toUpperCase();
       document.getElementById('title').textContent = title;
-      document.title = 'AEGIS Preview \u2014 ' + title;
+      document.title = 'OntoSynth Preview \u2014 ' + title;
 
       // Render preview
       renderPreview(type, content);

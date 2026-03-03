@@ -1,0 +1,139 @@
+{
+  "name": "aegis-desktop",
+  "version": "5.4.1",
+  "description": "AEGIS Desktop — Advanced Chat Client for OpenClaw Gateway",
+  "main": "dist-electron/main.js",
+  "author": "Rashed",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AegisStar/aegis-desktop.git"
+  },
+  "scripts": {
+    "dev": "concurrently --kill-others-on-fail \"vite\" \"wait-on http://localhost:5173 && node scripts/build-electron.js && electron . --enable-logging\"",
+    "dev:web": "vite",
+    "build:electron": "node scripts/build-electron.js",
+    "build:renderer": "vite build",
+    "build": "node scripts/build-electron.js && vite build",
+    "package": "npm run build && electron-builder --win",
+    "package:portable": "npm run build && electron-builder --win portable"
+  },
+  "dependencies": {
+    "@emoji-mart/data": "^1.2.1",
+    "@emoji-mart/react": "^1.1.1",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-web-links": "^0.11.0",
+    "@xterm/xterm": "^5.5.0",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "electron-updater": "^6.8.3",
+    "framer-motion": "^11.15.0",
+    "i18next": "^25.8.4",
+    "lucide-react": "^0.469.0",
+    "node-pty": "^1.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-i18next": "^16.5.4",
+    "react-markdown": "^9.0.1",
+    "react-router-dom": "^7.13.0",
+    "react-syntax-highlighter": "^15.6.1",
+    "recharts": "^3.7.0",
+    "rehype-raw": "^7.0.0",
+    "remark-gfm": "^4.0.0",
+    "ws": "^8.18.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "@types/ws": "^8.5.13",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.0",
+    "electron": "^33.3.1",
+    "electron-builder": "^25.1.8",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.aegis.desktop",
+    "productName": "AEGIS Desktop",
+    "copyright": "Copyright © 2026 Rashed",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/node-pty/**/*"
+    ],
+    "compression": "maximum",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "AEGIS Desktop",
+      "menuCategory": "AEGIS",
+      "perMachine": false,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "installerSidebar": null,
+      "artifactName": "AEGIS-Desktop-Setup-${version}.${ext}",
+      "unicode": true,
+      "include": "installer/nsis-script.nsh",
+      "installerLanguages": [
+        "en_US",
+        "ar_SA"
+      ]
+    },
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "assets/**/*",
+      "!assets/*.png"
+    ],
+    "extraResources": [
+      {
+        "from": "assets/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "fileAssociations": [],
+    "protocols": [
+      {
+        "name": "AEGIS Protocol",
+        "schemes": [
+          "aegis"
+        ]
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "rshodoskar-star",
+        "repo": "openclaw-desktop"
+      }
+    ]
+  }
+}

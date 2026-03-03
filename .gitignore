@@ -1,0 +1,16 @@
+node_modules/
+dist/
+dist-electron/
+release/
+*.log
+.DS_Store
+.env*
+aegis-config.json
+_old/
+UI/
+AEGIS-Desktop-v5-UPGRADE-PLAN.md
+-e 
+# v5.1 concept mockups
+*-concept*.html
+.trash/
+scripts/full-usage-stats.js

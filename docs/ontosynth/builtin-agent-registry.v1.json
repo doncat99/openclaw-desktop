@@ -1,0 +1,175 @@
+{
+  "version": "1.0.0",
+  "namespace": "ontosynth",
+  "managedBy": "ontosynth-bridge",
+  "description": "Built-in OntoSynth role agents to sync into OpenClaw agents.list.",
+  "defaults": {
+    "model": "anthropic/claude-sonnet-4",
+    "workspace": "${ONTOSYNTH_ROOT}",
+    "params": {
+      "temperature": 0.2
+    }
+  },
+  "syncPolicy": {
+    "idPrefix": "os.",
+    "upsert": true,
+    "disableDeletion": true,
+    "managedTag": "managed:ontosynth",
+    "updateFields": [
+      "name",
+      "model",
+      "workspace",
+      "params",
+      "metadata"
+    ]
+  },
+  "agents": [
+    {
+      "id": "os.orchestrator-agent",
+      "name": "OntoSynth Orchestrator",
+      "role": "orchestrator",
+      "description": "Plans phase order, validates prerequisites, and dispatches phase runs.",
+      "skillsRequired": [
+        "course-orchestration"
+      ],
+      "toolsAllowed": [
+        "ontosynth.pipeline.plan",
+        "ontosynth.pipeline.runPhase",
+        "ontosynth.artifacts.list",
+        "ontosynth.artifacts.approve"
+      ],
+      "primaryOutputs": [
+        "pipeline-plan"
+      ],
+      "handoffTo": [
+        "os.course-structure-agent",
+        "os.course-knowledge-agent",
+        "os.course-mindmap-agent",
+        "os.course-assessment-agent",
+        "os.course-slide-agent"
+      ],
+      "metadata": {
+        "builtin": true,
+        "phase": "control-plane"
+      }
+    },
+    {
+      "id": "os.course-structure-agent",
+      "name": "Course Structure Agent",
+      "role": "structure",
+      "description": "Creates course outline, modules, lessons, sequencing, and learning objectives.",
+      "skillsRequired": [
+        "course-structure"
+      ],
+      "toolsAllowed": [
+        "ontosynth.structure.generate",
+        "ontosynth.knowledge.search",
+        "ontosynth.artifacts.update"
+      ],
+      "primaryOutputs": [
+        "course-structure"
+      ],
+      "handoffTo": [
+        "os.course-knowledge-agent"
+      ],
+      "metadata": {
+        "builtin": true,
+        "phase": "structure"
+      }
+    },
+    {
+      "id": "os.course-knowledge-agent",
+      "name": "Course Knowledge Agent",
+      "role": "knowledge",
+      "description": "Expands structure into evidence-backed topic notes, references, and explanation depth.",
+      "skillsRequired": [
+        "course-knowledge"
+      ],
+      "toolsAllowed": [
+        "ontosynth.knowledge.summary",
+        "ontosynth.knowledge.preview",
+        "ontosynth.artifacts.update"
+      ],
+      "primaryOutputs": [
+        "course-knowledge"
+      ],
+      "handoffTo": [
+        "os.course-mindmap-agent"
+      ],
+      "metadata": {
+        "builtin": true,
+        "phase": "knowledge"
+      }
+    },
+    {
+      "id": "os.course-mindmap-agent",
+      "name": "Course Mindmap Agent",
+      "role": "mindmap",
+      "description": "Builds concept graph and dependency map from approved structure and knowledge.",
+      "skillsRequired": [
+        "course-mindmap"
+      ],
+      "toolsAllowed": [
+        "ontosynth.mindmap.generate",
+        "ontosynth.mindmap.layout",
+        "ontosynth.artifacts.update"
+      ],
+      "primaryOutputs": [
+        "course-mindmap"
+      ],
+      "handoffTo": [
+        "os.course-assessment-agent"
+      ],
+      "metadata": {
+        "builtin": true,
+        "phase": "mindmap"
+      }
+    },
+    {
+      "id": "os.course-assessment-agent",
+      "name": "Course Assessment Agent",
+      "role": "assessment",
+      "description": "Generates formative and summative assessment aligned to objectives and concept map.",
+      "skillsRequired": [
+        "course-assessment"
+      ],
+      "toolsAllowed": [
+        "ontosynth.assessment.generate",
+        "ontosynth.assessment.rubric",
+        "ontosynth.artifacts.update"
+      ],
+      "primaryOutputs": [
+        "course-assessment"
+      ],
+      "handoffTo": [
+        "os.course-slide-agent"
+      ],
+      "metadata": {
+        "builtin": true,
+        "phase": "assessment"
+      }
+    },
+    {
+      "id": "os.course-slide-agent",
+      "name": "Course Slide Agent",
+      "role": "slides",
+      "description": "Transforms approved course artifacts into slide deck content and speaker notes.",
+      "skillsRequired": [
+        "course-slide"
+      ],
+      "toolsAllowed": [
+        "ontosynth.slides.generate",
+        "ontosynth.slides.export",
+        "ontosynth.artifacts.update"
+      ],
+      "primaryOutputs": [
+        "course-slides"
+      ],
+      "handoffTo": [],
+      "metadata": {
+        "builtin": true,
+        "phase": "slides"
+      }
+    }
+  ]
+}

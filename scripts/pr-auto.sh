@@ -182,23 +182,17 @@ else
 fi
 
 run_push() {
-  local with_upstream="$1"
   local -a push_flags=()
   if [[ "$HISTORY_REPAIRED" == "1" ]]; then
     push_flags+=(--force-with-lease)
   fi
-  if [[ "$with_upstream" == "1" ]]; then
-    SKIP_CODEX_REVIEW=1 git push "${push_flags[@]}" -u "$REMOTE" "$CURRENT_BRANCH"
-  else
-    SKIP_CODEX_REVIEW=1 git push "${push_flags[@]}"
-  fi
+  SKIP_CODEX_REVIEW=1 git push "${push_flags[@]}" -u "$REMOTE" "$CURRENT_BRANCH"
 }
 
 push_with_retry() {
-  local with_upstream="$1"
   local push_output=""
   set +e
-  push_output="$(run_push "$with_upstream" 2>&1)"
+  push_output="$(run_push 2>&1)"
   local rc=$?
   set -e
   printf '%s\n' "$push_output"
@@ -212,24 +206,15 @@ push_with_retry() {
     if [[ "$HISTORY_REPAIRED" == "1" ]]; then
       push_flags+=(--force-with-lease)
     fi
-    if [[ "$with_upstream" == "1" ]]; then
-      SKIP_CODEX_REVIEW=1 git -c http.version=HTTP/1.1 -c http.postBuffer=524288000 push "${push_flags[@]}" -u "$REMOTE" "$CURRENT_BRANCH"
-    else
-      SKIP_CODEX_REVIEW=1 git -c http.version=HTTP/1.1 -c http.postBuffer=524288000 push "${push_flags[@]}"
-    fi
+    SKIP_CODEX_REVIEW=1 git -c http.version=HTTP/1.1 -c http.postBuffer=524288000 push "${push_flags[@]}" -u "$REMOTE" "$CURRENT_BRANCH"
     return $?
   fi
 
   return $rc
 }
 
-if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
-  echo "[pr-auto] Pushing branch: $CURRENT_BRANCH"
-  push_with_retry 0
-else
-  echo "[pr-auto] Pushing new branch with upstream: $REMOTE/$CURRENT_BRANCH"
-  push_with_retry 1
-fi
+echo "[pr-auto] Pushing branch with upstream: $REMOTE/$CURRENT_BRANCH"
+push_with_retry
 
 PR_EXISTS=0
 if gh pr view "$CURRENT_BRANCH" --json number >/dev/null 2>&1; then

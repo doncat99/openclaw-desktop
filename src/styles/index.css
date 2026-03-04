@@ -109,6 +109,28 @@
     box-shadow: 0 0 8px rgb(var(--color-red-400) / 0.5);
   }
 
+  /* Team Studio dialog pane: stronger, always-apparent scrollbar */
+  .team-dialog-scroll {
+    scrollbar-width: auto;
+    scrollbar-color: rgb(var(--aegis-overlay) / 0.55) rgb(var(--aegis-overlay) / 0.06);
+  }
+  .team-dialog-scroll::-webkit-scrollbar {
+    width: 10px;
+  }
+  .team-dialog-scroll::-webkit-scrollbar-track {
+    background: rgb(var(--aegis-overlay) / 0.06);
+    border-radius: 10px;
+  }
+  .team-dialog-scroll::-webkit-scrollbar-thumb {
+    background: rgb(var(--aegis-overlay) / 0.55);
+    border-radius: 10px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .team-dialog-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--aegis-overlay) / 0.72);
+  }
+
   /* ── Background Ambient Glow (from conceptual JSX) ── */
   .ambient-glow-teal {
     position: fixed; top: -200px; right: -200px;

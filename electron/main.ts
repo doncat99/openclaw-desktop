@@ -197,6 +197,28 @@ function createSplashWindow(): void {
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   });
 
+  let splashLogoDataUri = '';
+  const splashLogoCandidates = [
+    path.join(app.getAppPath(), 'assets', 'logo.png'),
+    path.join(__dirname, '..', 'assets', 'logo.png'),
+    path.join(__dirname, 'assets', 'logo.png'),
+  ];
+  for (const candidate of splashLogoCandidates) {
+    try {
+      if (fs.existsSync(candidate)) {
+        const logoBuf = fs.readFileSync(candidate);
+        splashLogoDataUri = `data:image/png;base64,${logoBuf.toString('base64')}`;
+        break;
+      }
+    } catch {
+      // Ignore candidate and continue fallback chain.
+    }
+  }
+
+  const splashLogoMarkup = splashLogoDataUri
+    ? `<img class="logo-img" src="${splashLogoDataUri}" alt="OntoSynth Logo" />`
+    : 'O';
+
   const splashHTML = `
     <!DOCTYPE html>
     <html>
@@ -214,12 +236,14 @@ function createSplashWindow(): void {
       }
       .logo {
         width: 72px; height: 72px; border-radius: 18px;
-        background: linear-gradient(135deg, #4EC9B0, #6C9FFF);
+        background: linear-gradient(135deg, #0f1726, #18273b);
         display: flex; align-items: center; justify-content: center;
         font-size: 32px; font-weight: 700; color: white;
         box-shadow: 0 8px 32px rgba(78,201,176,0.3);
         animation: float 2s ease-in-out infinite;
+        border: 1px solid rgba(78,201,176,0.3);
       }
+      .logo-img { width: 56px; height: 56px; object-fit: contain; display: block; }
       @keyframes float {
         0%,100% { transform: translateY(0); }
         50% { transform: translateY(-6px); }
@@ -237,8 +261,8 @@ function createSplashWindow(): void {
     </style>
     </head>
     <body>
-      <div class="logo">A</div>
-      <div class="title">AEGIS Desktop</div>
+      <div class="logo">${splashLogoMarkup}</div>
+      <div class="title">OntoSynth Desktop</div>
       <div class="subtitle">${t('splash.loading')}</div>
       <div class="spinner"></div>
     </body>
@@ -1392,4 +1416,3 @@ app.on('before-quit', () => {
 });
 
 console.log('Æ AEGIS Desktop v5.4.1 started');
-

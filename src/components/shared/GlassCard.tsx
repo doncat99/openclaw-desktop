@@ -49,9 +49,7 @@ export const GlassCard = React.memo(function GlassCard({
     >
       {/* Top light edge — subtle glass reflection */}
       <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/[0.06] to-transparent" />
-      <div className={noPad ? undefined : 'p-5'}>
-        {children}
-      </div>
+      {noPad ? children : <div className="p-5">{children}</div>}
     </motion.div>
   );
 });

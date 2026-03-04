@@ -6,11 +6,12 @@ import { useChatStore, Session } from '@/stores/chatStore';
 import { useGatewayDataStore } from '@/stores/gatewayDataStore';
 import { gateway } from '@/services/gateway';
 import { themeHex, themeAlpha, dataColor } from '@/utils/theme-colors';
+import neuraLogo from '../../../assets/logo.png';
 import clsx from 'clsx';
 
 // ═══════════════════════════════════════════════════════════
 // ChatHeader — Compact header replacing old tab bar
-// Layout: Æ AEGIS ∨       +  ●  165k / 200k
+// Layout: logo NEURA ∨    +  ●  165k / 200k
 // ═══════════════════════════════════════════════════════════
 
 const MAIN_SESSION = 'agent:main:main';
@@ -35,7 +36,7 @@ function formatDuration(ms: number): string {
 
 /** Readable label for a session tab */
 function sessionLabel(session: Session | undefined, key: string): string {
-  if (key === MAIN_SESSION) return 'AEGIS';
+  if (key === MAIN_SESSION) return 'NEURA';
   if (session?.label) {
     const label = session.label;
     return label.length > 30 ? label.slice(0, 28) + '…' : label;
@@ -46,7 +47,7 @@ function sessionLabel(session: Session | undefined, key: string): string {
 }
 
 // ═══════════════════════════════════════════════════════════
-// Agent Status Tooltip — hover card on AEGIS identity
+// Agent Status Tooltip — hover card on NEURA identity
 // ═══════════════════════════════════════════════════════════
 
 function AgentStatusTooltip({ visible, tokenUsage, connected }: {
@@ -91,11 +92,11 @@ function AgentStatusTooltip({ visible, tokenUsage, connected }: {
         >
           {/* Header */}
           <div className="flex items-center gap-3 p-4 border-b border-[rgb(var(--aegis-overlay)/0.06)]">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-aegis-primary/20 to-aegis-primary/5 border border-aegis-primary/25 flex items-center justify-center text-lg">
-              Æ
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-aegis-primary/20 to-aegis-primary/5 border border-aegis-primary/25 flex items-center justify-center">
+              <img src={neuraLogo} alt="NEURA" className="w-7 h-7 object-contain" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-bold text-aegis-primary">AEGIS</div>
+              <div className="text-sm font-bold text-aegis-primary">NEURA</div>
               <div className="text-[9px] text-aegis-text-dim font-mono">{modelShort}</div>
             </div>
             <div className={clsx(
@@ -434,7 +435,7 @@ export function ChatTabs() {
     >
       {/* ── Left: Identity + Status + Tokens + Session Switcher ── */}
       <div className="relative flex items-center gap-2.5 min-w-0">
-        {/* AEGIS identity block — hover for tooltip */}
+        {/* NEURA identity block — hover for tooltip */}
         <div
           ref={identityRef}
           className="flex items-center gap-2.5 cursor-default select-none"
@@ -443,7 +444,9 @@ export function ChatTabs() {
         >
           {/* Icon */}
           {isMain ? (
-            <span className="text-[15px] leading-none">Æ</span>
+            <div className="w-[18px] h-[18px] rounded-full overflow-hidden border border-aegis-primary/25 bg-[rgb(var(--aegis-overlay)/0.03)]">
+              <img src={neuraLogo} alt="NEURA" className="w-full h-full object-contain" />
+            </div>
           ) : (
             <MessageSquare size={14} className="text-aegis-text-muted" />
           )}
@@ -568,4 +571,3 @@ export function ChatTabs() {
     </div>
   );
 }
-

@@ -179,6 +179,76 @@ Browser-only mode (without Electron):
 npm run dev:web
 ```
 
+### 4) Codex Code Review CLI (manual + automatic)
+
+Run review manually (against base branch):
+
+```bash
+pnpm run review:codex
+```
+
+Run review for current uncommitted changes:
+
+```bash
+pnpm run review:codex:uncommitted
+```
+
+Enable automatic review on every `git push`:
+
+```bash
+pnpm run review:install-hook
+```
+
+This installs a pre-push hook in `.githooks/pre-push` that runs Codex review automatically.
+If you need to skip once:
+
+```bash
+SKIP_CODEX_REVIEW=1 git push
+```
+
+### 5) One-Command PR Automation (GitHub CLI)
+
+Create/update PR automatically from current branch:
+
+```bash
+pnpm run pr:auto
+```
+
+What it does:
+- Runs Codex review against repo default base branch (unless skipped)
+- If working tree is dirty, auto-stages changes and lets Codex draft commit message, then commits
+- Pushes branch to `origin` (sets upstream on first push)
+- Creates PR if missing, or updates existing PR if already open
+- Optionally adds reviewers/labels
+
+Useful options:
+
+```bash
+# Skip Codex review once
+pnpm run pr:auto:skip-review
+
+# Add reviewers and labels
+PR_AUTO_REVIEWERS="alice,bob" PR_AUTO_LABELS="needs-review,desktop" pnpm run pr:auto
+
+# Override base branch
+PR_AUTO_BASE="main" pnpm run pr:auto
+
+# Disable auto-commit behavior (requires clean tree or manual commit)
+PR_AUTO_AUTOCOMMIT=0 pnpm run pr:auto
+
+# Enforce review (fail PR flow if Codex review cannot run)
+PR_AUTO_REVIEW_REQUIRED=1 pnpm run pr:auto
+
+# Disable auto history repair (default is on)
+PR_AUTO_REPAIR_HISTORY=0 pnpm run pr:auto
+```
+
+Notes:
+- If you run from `main`/`master`, the script auto-creates a branch like `codex/pr-YYYYMMDD-HHMMSS`.
+- Auto-commit is enabled by default when working tree is dirty. Set `PR_AUTO_AUTOCOMMIT=0` to require manual commits.
+- If branch ancestry is incompatible with base (no common history), `pr:auto` auto-repairs ancestry and force-pushes with lease.
+- `pr:auto` skips pre-push hook rerun intentionally (`SKIP_CODEX_REVIEW=1`) to avoid duplicate review in same flow.
+
 ---
 
 ## 🔌 How It Works

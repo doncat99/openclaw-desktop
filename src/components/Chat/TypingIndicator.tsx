@@ -1,6 +1,8 @@
 import clsx from 'clsx';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { useChatStore } from '@/stores/chatStore';
 import { getDirection } from '@/i18n';
+import { getAgentTagForSession } from './agentIdentity';
 
 // ═══════════════════════════════════════════════════════════
 // Typing Indicator — smooth animated dots
@@ -8,13 +10,16 @@ import { getDirection } from '@/i18n';
 
 export function TypingIndicator() {
   const { language } = useSettingsStore();
+  const activeSessionKey = useChatStore((s) => s.activeSessionKey);
+  const sessions = useChatStore((s) => s.sessions);
   const dir = getDirection(language);
+  const assistantTag = getAgentTagForSession(activeSessionKey, sessions);
 
   return (
     <div className="flex items-start gap-3 px-5 py-2 animate-fade-in" dir={dir}>
       {/* Avatar */}
       <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-aegis-primary to-aegis-accent flex items-center justify-center shrink-0 mt-0.5 shadow-glow-sm">
-        <span className="text-[10px] font-bold text-aegis-text">A</span>
+        <span className="text-[9px] font-bold tracking-[0.2px] text-aegis-text">{assistantTag}</span>
       </div>
 
       {/* Dots container */}

@@ -407,6 +407,11 @@
   "settings": {
     "title": "الإعدادات",
     "language": "اللغة",
+    "languageAuto": "كشف تلقائي",
+    "languageAutoHint": "وضع الكشف التلقائي يتبع لغة النظام/Codex الحالية.",
+    "languageEnglish": "English",
+    "languageArabic": "العربية",
+    "languageChinese": "中文",
     "notifications": "التنبيهات",
     "enableNotifications": "تفعيل التنبيهات",
     "notificationsDesc": "تنبيهات سطح المكتب عند وصول رسالة",
@@ -498,7 +503,7 @@
     "reconnect": "إعادة الاتصال",
     "connectGateway": "اتصل بالـ Gateway",
     "toggleTheme": "تغيير المظهر",
-    "toggleLanguage": "Switch to English",
+    "toggleLanguage": "تبديل اللغة",
     "toggleNotifications": "تبديل التنبيهات",
     "searchPlaceholder": "ابحث في الأوامر..."
   },

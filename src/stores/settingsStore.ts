@@ -1,8 +1,11 @@
 import { create } from 'zustand';
+import { getStorageItem, setStorageItem, storageKey } from '@/utils/storage';
 
 // ═══════════════════════════════════════════════════════════
 // Settings Store
 // ═══════════════════════════════════════════════════════════
+
+export type AppLanguage = 'auto' | 'ar' | 'en' | 'zh';
 
 interface SettingsState {
   theme: 'aegis-dark' | 'aegis-light';
@@ -10,7 +13,7 @@ interface SettingsState {
   sidebarOpen: boolean;
   sidebarWidth: number;
   settingsOpen: boolean;
-  language: 'ar' | 'en';
+  language: AppLanguage;
   notificationsEnabled: boolean;
   soundEnabled: boolean;
   dndMode: boolean;
@@ -31,7 +34,7 @@ interface SettingsState {
   setSidebarOpen: (open: boolean) => void;
   setSidebarWidth: (width: number) => void;
   setSettingsOpen: (open: boolean) => void;
-  setLanguage: (lang: 'ar' | 'en') => void;
+  setLanguage: (lang: AppLanguage) => void;
   setNotificationsEnabled: (enabled: boolean) => void;
   setSoundEnabled: (enabled: boolean) => void;
   setDndMode: (dnd: boolean) => void;
@@ -48,12 +51,11 @@ interface SettingsState {
 }
 
 // Auto-detect language on first run: check saved → system language → fallback to English
-const detectLang = (): 'ar' | 'en' => {
-  const saved = localStorage.getItem('aegis-language');
-  if (saved === 'ar' || saved === 'en') return saved;
+const detectLang = (): AppLanguage => {
+  const saved = getStorageItem(storageKey('language'));
+  if (saved === 'auto' || saved === 'ar' || saved === 'en' || saved === 'zh') return saved;
   // First run — detect from system/browser language
-  const sysLang = navigator.language || navigator.languages?.[0] || '';
-  return sysLang.startsWith('ar') ? 'ar' : 'en';
+  return 'auto';
 };
 const savedLang = detectLang();
 
@@ -91,7 +93,10 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setSidebarWidth: (width) => set({ sidebarWidth: width }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
-  setLanguage: (lang) => set({ language: lang }),
+  setLanguage: (lang) => {
+    setStorageItem(storageKey('language'), lang);
+    set({ language: lang });
+  },
   setNotificationsEnabled: (enabled) => { localStorage.setItem('aegis-notifications', String(enabled)); set({ notificationsEnabled: enabled }); },
   setSoundEnabled: (enabled) => { localStorage.setItem('aegis-sound', String(enabled)); set({ soundEnabled: enabled }); },
   setDndMode: (dnd) => set({ dndMode: dnd }),

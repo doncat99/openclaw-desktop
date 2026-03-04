@@ -430,10 +430,12 @@ export async function fetchFullCost(days = 365): Promise<CostSummary | null> {
 /**
  * Fetch heavy usage data on-demand (for FullAnalytics).
  */
-export async function fetchFullUsage(limit = 2000): Promise<SessionsUsage | null> {
+export async function fetchFullUsage(
+  params: { limit?: number; startDate?: string; endDate?: string; key?: string } = {}
+): Promise<SessionsUsage | null> {
   if (!gw) return null;
   try {
-    return await gw.getSessionsUsage({ limit });
+    return await gw.getSessionsUsage(params);
   } catch {
     return null;
   }

@@ -12,6 +12,7 @@ import {
   MessageCircle,
   Network,
   RefreshCw,
+  RotateCcw,
   Settings2,
   Send,
   ShieldCheck,
@@ -47,6 +48,26 @@ interface TeamChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
+}
+
+type DelegationRunStatus = 'running' | 'completed' | 'failed' | 'timed_out' | 'blocked';
+
+interface DelegationRun {
+  key: string;
+  intentKey: string;
+  runId: string;
+  agentId: string;
+  agentTitle: string;
+  childSessionKey: string;
+  task: string;
+  label: string;
+  spawnedAt: string;
+  completedAt?: string;
+  status: DelegationRunStatus;
+  timeoutSeconds: number;
+  resultSnippet?: string;
+  errorText?: string;
+  runtimeSeconds?: number;
 }
 
 interface RoleDraft {
@@ -94,9 +115,16 @@ interface SaveProfileResult {
   error?: string;
 }
 
+interface AutoRetryMetaEntry {
+  attempts: number;
+  lastRetryAt?: number;
+  finalTimeout?: boolean;
+}
+
 const CLAWHUB_API = 'https://clawhub.ai/api/v1';
 const hubSkillSearchCache = new Map<string, HubSkillCandidate[]>();
 const hubSkillDetailCache = new Map<string, HubSkillDetail>();
+const AUTO_RETRY_COOLDOWN_MS = 12_000;
 
 const STOP_WORDS = new Set([
   'and', 'the', 'for', 'with', 'from', 'that', 'this', 'into', 'your', 'you', 'are', 'not', 'all',
@@ -111,6 +139,11 @@ function sleep(ms: number): Promise<void> {
 function toEpochMs(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string') {
+    const numeric = value.trim();
+    if (/^\d{10,}$/.test(numeric)) {
+      const parsedNum = Number(numeric);
+      if (Number.isFinite(parsedNum)) return parsedNum;
+    }
     const ts = Date.parse(value);
     if (!Number.isNaN(ts)) return ts;
   }
@@ -141,6 +174,33 @@ function arraysEqual(a: string[], b: string[]): boolean {
 
 function compactText(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
+}
+
+function clipText(value: string, max = 260): string {
+  const clean = compactText(value);
+  if (clean.length <= max) return clean;
+  return `${clean.slice(0, Math.max(0, max - 1)).trim()}…`;
+}
+
+function tokenizeTask(value: string): Set<string> {
+  const tokens = compactText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, ' ')
+    .split(/\s+/)
+    .filter((token) => token.length >= 4 && !STOP_WORDS.has(token));
+  return new Set(tokens);
+}
+
+function taskSimilarity(a: string, b: string): number {
+  const as = tokenizeTask(a);
+  const bs = tokenizeTask(b);
+  if (as.size === 0 || bs.size === 0) return 0;
+  let common = 0;
+  as.forEach((token) => {
+    if (bs.has(token)) common += 1;
+  });
+  const denom = Math.min(as.size, bs.size);
+  return denom > 0 ? common / denom : 0;
 }
 
 function modelDisplayName(modelId: string): string {
@@ -507,6 +567,218 @@ function parseHistory(raw: any[]): TeamChatMessage[] {
     .filter(Boolean) as TeamChatMessage[];
 }
 
+function inferAgentIdFromSubagentSessionKey(sessionKey: string): string {
+  const match = sessionKey.match(/^agent:([^:]+):subagent:/i);
+  return match?.[1]?.trim() || '';
+}
+
+function parseSubagentCompletionEvent(text: string): {
+  sessionKey: string;
+  status: string;
+  task: string;
+  result: string;
+  runtimeSeconds?: number;
+} | null {
+  if (!text || !text.includes('[Internal task completion event]')) return null;
+  if (!/source:\s*subagent/i.test(text)) return null;
+
+  const sessionKey = text.match(/session_key:\s*([^\n\r]+)/i)?.[1]?.trim() || '';
+  if (!sessionKey) return null;
+
+  const status = text.match(/status:\s*([^\n\r]+)/i)?.[1]?.trim() || '';
+  const task = text.match(/task:\s*([^\n\r]+)/i)?.[1]?.trim() || '';
+  const result = (
+    text.match(/Result\s*\(untrusted content[\s\S]*?\):\s*([\s\S]*?)(?:\n\nStats:|\nStats:|$)/i)?.[1] || ''
+  ).trim();
+  const runtimeSeconds = Number(text.match(/runtime\s+(\d+)s/i)?.[1] || 0);
+
+  return {
+    sessionKey,
+    status,
+    task,
+    result,
+    runtimeSeconds: Number.isFinite(runtimeSeconds) && runtimeSeconds > 0 ? runtimeSeconds : undefined,
+  };
+}
+
+function buildDelegationIntentKey(agentId: string, task: string): string {
+  const agent = compactText(agentId).toLowerCase();
+  const normalizedTask = compactText(task).toLowerCase().slice(0, 900);
+  return `${agent}::${normalizedTask}`;
+}
+
+function delegationStatusMeta(status: DelegationRunStatus): { label: string; className: string } {
+  switch (status) {
+    case 'completed':
+      return { label: 'COMPLETED', className: 'text-aegis-success border-aegis-success/25 bg-aegis-success/10' };
+    case 'blocked':
+      return { label: 'BLOCKED', className: 'text-aegis-warning border-aegis-warning/25 bg-aegis-warning/10' };
+    case 'failed':
+      return { label: 'FAILED', className: 'text-aegis-danger border-aegis-danger/25 bg-aegis-danger/10' };
+    case 'timed_out':
+      return { label: 'TIMEOUT', className: 'text-aegis-warning border-aegis-warning/25 bg-aegis-warning/10' };
+    default:
+      return { label: 'RUNNING', className: 'text-aegis-primary border-aegis-primary/25 bg-aegis-primary/10' };
+  }
+}
+
+function deriveDelegationRuns(
+  rawMessages: any[],
+  definitions: TeamMemberDefinition[],
+  historyFresh = true,
+): DelegationRun[] {
+  if (!Array.isArray(rawMessages) || rawMessages.length === 0) return [];
+
+  const agentTitleById = new Map<string, string>();
+  definitions.forEach((def) => {
+    agentTitleById.set(def.openclawAgentId, def.title);
+  });
+
+  const spawnCallsById = new Map<string, {
+    agentId: string;
+    task: string;
+    label: string;
+    runTimeoutSeconds: number;
+  }>();
+
+  const runsByKey = new Map<string, DelegationRun>();
+
+  rawMessages.forEach((message: any, index: number) => {
+    const ts = String(message?.timestamp || new Date().toISOString());
+    const role = String(message?.role || '').toLowerCase();
+
+    if (role === 'assistant' && Array.isArray(message?.content)) {
+      message.content.forEach((part: any, partIndex: number) => {
+        if (String(part?.type || '') !== 'toolCall') return;
+        if (String(part?.name || '') !== 'sessions_spawn') return;
+
+        const callId = String(part?.id || `sessions-spawn-${index}-${partIndex}`);
+        let args: any = {};
+        if (part?.arguments && typeof part.arguments === 'object') {
+          args = part.arguments;
+        } else if (typeof part?.arguments === 'string') {
+          args = parseJsonObject(part.arguments) || {};
+        }
+
+        const timeoutRaw = Number(args?.runTimeoutSeconds);
+        spawnCallsById.set(callId, {
+          agentId: String(args?.agentId || '').trim(),
+          task: compactText(String(args?.task || '')),
+          label: compactText(String(args?.label || '')),
+          runTimeoutSeconds: Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : 300,
+        });
+      });
+      return;
+    }
+
+    if (role === 'toolresult' && String(message?.toolName || '') === 'sessions_spawn') {
+      const callId = String(message?.toolCallId || '');
+      const callInfo = spawnCallsById.get(callId);
+      const payload = parseJsonObject(extractText(message?.content).trim()) || {};
+      const accepted = String(payload?.status || '').toLowerCase() === 'accepted';
+
+      if (accepted) {
+        const childSessionKey = String(payload?.childSessionKey || '').trim();
+        const runId = String(payload?.runId || '').trim() || `run-${callId || index}`;
+        const agentId = inferAgentIdFromSubagentSessionKey(childSessionKey) || callInfo?.agentId || '';
+        const key = runId || childSessionKey || `spawn-${index}`;
+        const existing = runsByKey.get(key);
+        const task = callInfo?.task || existing?.task || '';
+        const intentKey = buildDelegationIntentKey(agentId, task);
+        runsByKey.set(key, {
+          key,
+          intentKey: existing?.intentKey || intentKey,
+          runId,
+          agentId,
+          agentTitle: agentTitleById.get(agentId) || agentId || 'Unknown agent',
+          childSessionKey,
+          task,
+          label: callInfo?.label || existing?.label || '',
+          spawnedAt: existing?.spawnedAt || ts,
+          completedAt: existing?.completedAt,
+          status: existing?.status || 'running',
+          timeoutSeconds: callInfo?.runTimeoutSeconds || existing?.timeoutSeconds || 300,
+          resultSnippet: existing?.resultSnippet,
+          errorText: existing?.errorText,
+          runtimeSeconds: existing?.runtimeSeconds,
+        });
+      } else {
+        const agentId = callInfo?.agentId || '';
+        const errText = compactText(String(payload?.error || payload?.message || extractText(message?.content) || 'Spawn failed'));
+        const blocked = /not allowed for sessions_spawn|forbidden/i.test(errText);
+        const key = `spawn-failed-${callId || index}`;
+        const task = callInfo?.task || '';
+        runsByKey.set(key, {
+          key,
+          intentKey: buildDelegationIntentKey(agentId, task),
+          runId: '',
+          agentId,
+          agentTitle: agentTitleById.get(agentId) || agentId || 'Unknown agent',
+          childSessionKey: '',
+          task,
+          label: callInfo?.label || '',
+          spawnedAt: ts,
+          status: blocked ? 'blocked' : 'failed',
+          timeoutSeconds: callInfo?.runTimeoutSeconds || 300,
+          errorText: errText,
+        });
+      }
+      return;
+    }
+
+    if (role !== 'user') return;
+    const content = extractText(message?.content);
+    const event = parseSubagentCompletionEvent(content);
+    if (!event) return;
+
+    const matched = Array.from(runsByKey.values()).find((run) => run.childSessionKey === event.sessionKey);
+    const matchKey = matched?.key || event.sessionKey;
+    const agentId = matched?.agentId || inferAgentIdFromSubagentSessionKey(event.sessionKey) || '';
+    const task = matched?.task || event.task || '';
+    const intentKey = matched?.intentKey || buildDelegationIntentKey(agentId, task);
+    const normalizedStatus = compactText(event.status).toLowerCase();
+    const completed = normalizedStatus.includes('completed successfully');
+    const status: DelegationRunStatus = completed ? 'completed' : 'failed';
+
+    runsByKey.set(matchKey, {
+      key: matchKey,
+      intentKey,
+      runId: matched?.runId || '',
+      agentId,
+      agentTitle: matched?.agentTitle || agentTitleById.get(agentId) || agentId || 'Unknown agent',
+      childSessionKey: event.sessionKey,
+      task,
+      label: matched?.label || '',
+      spawnedAt: matched?.spawnedAt || ts,
+      completedAt: ts,
+      status,
+      timeoutSeconds: matched?.timeoutSeconds || 300,
+      resultSnippet: clipText(event.result || '', 360),
+      errorText: completed ? '' : (event.result || normalizedStatus || 'Subagent reported failure'),
+      runtimeSeconds: event.runtimeSeconds || matched?.runtimeSeconds,
+    });
+  });
+
+  const now = Date.now();
+  return Array.from(runsByKey.values())
+    .map((run) => {
+      if (!historyFresh) return run;
+      if (run.status !== 'running') return run;
+      const started = toEpochMs(run.spawnedAt);
+      if (!started) return run;
+      const ageMs = now - started;
+      if (ageMs > run.timeoutSeconds * 1000) {
+        return {
+          ...run,
+          status: 'timed_out' as const,
+          errorText: run.errorText || `No completion callback after ${run.timeoutSeconds}s.`,
+        };
+      }
+      return run;
+    })
+    .sort((a, b) => toEpochMs(b.spawnedAt) - toEpochMs(a.spawnedAt));
+}
+
 function sameHistory(a: TeamChatMessage[], b: TeamChatMessage[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i += 1) {
@@ -669,6 +941,7 @@ function buildTeamCharter(
   definitions: TeamMemberDefinition[],
   interactions: TeamInteractionDefinition[],
   resolvedAgentByKey: Map<string, string>,
+  allowedDelegates: string[] = [],
 ): string {
   const roster = definitions
     .filter((def) => def.key !== 'controller')
@@ -700,6 +973,8 @@ function buildTeamCharter(
     purpose: edge.purpose,
   }));
 
+  const policyList = allowedDelegates.filter(Boolean);
+
   return [
     '[TEAM_STUDIO_CHARTER]',
     `You are ${profiles[lead.key]?.title || lead.title}, the lead for this team session.`,
@@ -711,6 +986,9 @@ function buildTeamCharter(
     '5) Ask for human approval before irreversible operations.',
     '6) Default to decisive planning and concrete execution proposals from available context.',
     '7) Ask at most one blocking clarification question; do not return a long questionnaire.',
+    policyList.length > 0 ? `8) sessions_spawn hard policy: you may spawn ONLY these agent IDs: ${policyList.join(', ')}.` : '',
+    policyList.length > 0 ? '9) If a role is outside the allowed spawn list, do not call sessions_spawn for it; report it as blocked and continue with allowed agents.' : '',
+    '10) Intern routing rule: do not spawn team-intern-research directly unless policy explicitly allows it. Route research via COO (team-coo-operations) and ask COO to delegate to Intern.',
     'Required response format:',
     '- Decision summary',
     '- Delegations (agent -> task -> expected output)',
@@ -720,6 +998,24 @@ function buildTeamCharter(
     `Interaction matrix JSON: ${JSON.stringify(handoffMatrix)}`,
     '[/TEAM_STUDIO_CHARTER]',
   ].join('\n');
+}
+
+function buildResumePrompt(lastUserRequest: string, reason?: string, lastAssistantSnippet?: string): string {
+  const lines = [
+    '[TEAM_STUDIO_RESUME]',
+    'The previous run in this same session was interrupted.',
+    reason ? `Interruption reason: ${reason}` : '',
+    `Original user request: ${lastUserRequest}`,
+    lastAssistantSnippet ? `Last visible assistant progress: ${lastAssistantSnippet}` : '',
+    'Continue from the last completed checkpoint. Do not restart from scratch.',
+    'Return the standard Team Studio format:',
+    '- Decision summary',
+    '- Delegations (agent -> task -> expected output)',
+    '- Current blockers',
+    '- Next checkpoint',
+    '[/TEAM_STUDIO_RESUME]',
+  ].filter(Boolean);
+  return lines.join('\n');
 }
 
 function StatusPill({ active }: { active: boolean }) {
@@ -1484,6 +1780,7 @@ export function TeamMonitorPage() {
     leadAgentId,
     profiles,
     proposals,
+    conversationStates,
     setLeadAgentId,
     syncFromDefinitions,
     updateProfile,
@@ -1491,9 +1788,15 @@ export function TeamMonitorPage() {
     upsertProposal,
     setProposalStatus,
     removeProposal,
+    markConversationPending,
+    markConversationProgress,
+    markConversationInterrupted,
+    clearConversationState,
   } = useTeamStudioStore();
 
   const [messages, setMessages] = useState<TeamChatMessage[]>([]);
+  const [historyRows, setHistoryRows] = useState<any[]>([]);
+  const [lastHistoryLoadedAt, setLastHistoryLoadedAt] = useState(0);
   const [input, setInput] = useState('');
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [sending, setSending] = useState(false);
@@ -1506,7 +1809,10 @@ export function TeamMonitorPage() {
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelsError, setModelsError] = useState('');
-  const [showLayoutDebug, setShowLayoutDebug] = useState(true);
+  const [leadAllowedAgentIds, setLeadAllowedAgentIds] = useState<string[]>([]);
+  const [autoRetryMeta, setAutoRetryMeta] = useState<Record<string, AutoRetryMetaEntry>>({});
+  const [showDelegationHistory, setShowDelegationHistory] = useState(false);
+  const [showLayoutDebug, setShowLayoutDebug] = useState(false);
   const [layoutDebugCopied, setLayoutDebugCopied] = useState(false);
   const [dialogShellForcedHeight, setDialogShellForcedHeight] = useState(() => {
     if (typeof window === 'undefined') return 640;
@@ -1531,6 +1837,9 @@ export function TeamMonitorPage() {
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const stickyScrollRef = useRef(true);
   const forceScrollRef = useRef(true);
+  const historyFetchInFlightRef = useRef(false);
+  const autoRetryTimersRef = useRef<Map<string, number>>(new Map());
+  const latestDelegationByIntentRef = useRef<Map<string, DelegationRun>>(new Map());
   const lastLayoutLogRef = useRef(0);
   const lastLayoutSnapshotRef = useRef('');
   const layoutCopyResetTimerRef = useRef<number | null>(null);
@@ -1625,7 +1934,46 @@ export function TeamMonitorPage() {
     return teamDefs.find((def) => def.key === activeLead.key) || teamDefs[0];
   }, [activeLead, teamDefs]);
 
+  useEffect(() => {
+    let canceled = false;
+    const loadLeadPolicy = async () => {
+      if (!connected || !activeLead?.agentId) {
+        if (!canceled) setLeadAllowedAgentIds([]);
+        return;
+      }
+      try {
+        const snapshot = await gateway.call('config.get', {});
+        const list = Array.isArray(snapshot?.config?.agents?.list) ? snapshot.config.agents.list : [];
+        const entry = list.find((item: any) => item && typeof item === 'object' && item.id === activeLead.agentId);
+        const allow = Array.isArray(entry?.subagents?.allowAgents)
+          ? entry.subagents.allowAgents.map((item: any) => String(item || '').trim()).filter(Boolean)
+          : [];
+        if (!canceled) setLeadAllowedAgentIds(allow);
+      } catch {
+        if (!canceled) setLeadAllowedAgentIds([]);
+      }
+    };
+    void loadLeadPolicy();
+    return () => {
+      canceled = true;
+    };
+  }, [connected, activeLead?.agentId]);
+
   const sessionKey = useMemo(() => buildSessionKey(activeLead?.agentId || leadAgentId || 'main'), [activeLead, leadAgentId]);
+
+  const historyFresh = useMemo(() => {
+    if (!lastHistoryLoadedAt) return false;
+    return Date.now() - lastHistoryLoadedAt <= 15_000;
+  }, [lastHistoryLoadedAt, messages.length]);
+
+  const leadAllowedSummary = useMemo(() => {
+    if (leadAllowedAgentIds.length === 0) return '';
+    const names = leadAllowedAgentIds.map((agentId) => {
+      const def = teamDefs.find((item) => item.openclawAgentId === agentId);
+      return def?.title || agentId;
+    });
+    return names.join(', ');
+  }, [leadAllowedAgentIds, teamDefs]);
 
   const teamAgentIds = useMemo(() => {
     const ids = new Set<string>();
@@ -1641,6 +1989,113 @@ export function TeamMonitorPage() {
       return teamAgentIds.has(sessionAgentId);
     });
   }, [sessions, teamAgentIds]);
+
+  const activeTeamSession = useMemo(() => {
+    return teamSessions.find((session: any) => session?.key === sessionKey) || null;
+  }, [teamSessions, sessionKey]);
+
+  const sessionRunning = useMemo(() => {
+    if (!activeTeamSession) return false;
+    if (typeof activeTeamSession?.running === 'boolean') return activeTeamSession.running;
+    const lastActiveMs = toEpochMs(activeTeamSession?.lastActive || activeTeamSession?.updatedAt);
+    if (lastActiveMs && Date.now() - lastActiveMs <= 90_000) return true;
+    return false;
+  }, [activeTeamSession]);
+
+  const conversationState = useMemo(() => conversationStates[sessionKey] || null, [conversationStates, sessionKey]);
+
+  const delegationRuns = useMemo(
+    () => deriveDelegationRuns(historyRows, teamDefs, historyFresh),
+    [historyRows, teamDefs, historyFresh],
+  );
+
+  const recoveredDelegationKeys = useMemo(() => {
+    const latestCompletedByAgent = new Map<string, number>();
+    const completedRuns: Array<{ completedAt: number; spawnedAt: number; task: string; label: string }> = [];
+    delegationRuns.forEach((run) => {
+      if (run.status !== 'completed') return;
+      const agentId = compactText(run.agentId);
+      if (!agentId) return;
+      const completedTs = toEpochMs(run.completedAt || run.spawnedAt);
+      const spawnedTs = toEpochMs(run.spawnedAt);
+      if (!completedTs) return;
+      const prev = latestCompletedByAgent.get(agentId) || 0;
+      if (completedTs > prev) latestCompletedByAgent.set(agentId, completedTs);
+      completedRuns.push({
+        completedAt: completedTs,
+        spawnedAt: spawnedTs,
+        task: run.task || '',
+        label: run.label || '',
+      });
+    });
+
+    const keys = new Set<string>();
+    delegationRuns.forEach((run) => {
+      if (!['failed', 'timed_out', 'blocked'].includes(run.status)) return;
+      const agentId = compactText(run.agentId);
+      if (!agentId) return;
+      const completedAt = latestCompletedByAgent.get(agentId) || 0;
+      const runStartedAt = toEpochMs(run.spawnedAt);
+      if (completedAt > 0 && runStartedAt > 0 && completedAt > runStartedAt) {
+        keys.add(run.key);
+        return;
+      }
+
+      // For BLOCKED cases, a later relay completion by another agent should recover it
+      // if it clearly matches the same task intent.
+      if (run.status === 'blocked' && runStartedAt > 0) {
+        const matchedRelay = completedRuns.some((done) => {
+          if (done.completedAt <= runStartedAt) return false;
+          const similarity = taskSimilarity(run.task || '', done.task || '');
+          const relayHint = /relay|intern/i.test(done.label || '');
+          return similarity >= 0.45 || (relayHint && similarity >= 0.3);
+        });
+        if (matchedRelay) {
+          keys.add(run.key);
+        }
+      }
+    });
+    return keys;
+  }, [delegationRuns]);
+
+  const activeDelegationRuns = useMemo(() => {
+    return delegationRuns.filter((run) => !recoveredDelegationKeys.has(run.key));
+  }, [delegationRuns, recoveredDelegationKeys]);
+
+  const latestDelegationByIntent = useMemo(() => {
+    const map = new Map<string, DelegationRun>();
+    activeDelegationRuns.forEach((run) => {
+      const key = run.intentKey || run.key;
+      if (!map.has(key)) {
+        map.set(key, run);
+      }
+    });
+    return map;
+  }, [activeDelegationRuns]);
+
+  const latestDelegationRuns = useMemo(() => {
+    return Array.from(latestDelegationByIntent.values())
+      .sort((a, b) => toEpochMs(b.spawnedAt) - toEpochMs(a.spawnedAt));
+  }, [latestDelegationByIntent]);
+
+  const delegationRunsForDisplay = useMemo(() => {
+    return showDelegationHistory ? activeDelegationRuns : latestDelegationRuns;
+  }, [showDelegationHistory, activeDelegationRuns, latestDelegationRuns]);
+
+  const delegationCounts = useMemo(() => {
+    const counts = { running: 0, completed: 0, failed: 0, timed_out: 0, blocked: 0 };
+    latestDelegationRuns.forEach((run) => {
+      counts[run.status] += 1;
+    });
+    return counts;
+  }, [latestDelegationRuns]);
+
+  const failedDelegations = useMemo(
+    () => latestDelegationRuns.filter((run) => ['failed', 'timed_out', 'blocked'].includes(run.status)),
+    [latestDelegationRuns],
+  );
+
+  const recoveredDelegationCount = recoveredDelegationKeys.size;
 
   const activeSessions = useMemo(() => teamSessions.filter((session: any) => !!session?.running), [teamSessions]);
 
@@ -1695,6 +2150,18 @@ export function TeamMonitorPage() {
   useEffect(() => {
     stickyScrollRef.current = true;
     forceScrollRef.current = true;
+  }, [sessionKey]);
+
+  useEffect(() => {
+    latestDelegationByIntentRef.current = latestDelegationByIntent;
+  }, [latestDelegationByIntent]);
+
+  useEffect(() => {
+    setHistoryRows([]);
+    setLastHistoryLoadedAt(0);
+    setAutoRetryMeta({});
+    autoRetryTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    autoRetryTimersRef.current.clear();
   }, [sessionKey]);
 
   useEffect(() => {
@@ -1831,6 +2298,8 @@ export function TeamMonitorPage() {
       if (layoutCopyResetTimerRef.current) {
         window.clearTimeout(layoutCopyResetTimerRef.current);
       }
+      autoRetryTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+      autoRetryTimersRef.current.clear();
     };
   }, []);
 
@@ -1862,17 +2331,25 @@ export function TeamMonitorPage() {
   }, [layoutDebugText]);
 
   const loadHistory = useCallback(
-    async (showSpinner = true): Promise<TeamChatMessage[]> => {
+    async (showSpinner = true, silenceError = false): Promise<TeamChatMessage[]> => {
       if (!connected) return [];
       if (showSpinner) setLoadingHistory(true);
       try {
         const res = await gateway.getHistory(sessionKey, 120);
-        const parsed = parseHistory(Array.isArray(res?.messages) ? res.messages : []);
+        const rows = Array.isArray(res?.messages) ? res.messages : [];
+        const parsed = parseHistory(rows);
+        setHistoryRows(rows);
+        setLastHistoryLoadedAt(Date.now());
+        if (parsed.some((msg) => msg.role === 'user' || msg.role === 'assistant')) {
+          primedSessionsRef.current.add(sessionKey);
+        }
         setMessages((prev) => (sameHistory(prev, parsed) ? prev : parsed));
         return parsed;
       } catch (err: any) {
         const text = err?.message || String(err);
-        setNotice({ type: 'error', text });
+        if (!silenceError) {
+          setNotice({ type: 'error', text });
+        }
         return [];
       } finally {
         if (showSpinner) setLoadingHistory(false);
@@ -1885,6 +2362,82 @@ export function TeamMonitorPage() {
     if (!connected) return;
     loadHistory(true);
   }, [connected, sessionKey, loadHistory]);
+
+  useEffect(() => {
+    if (!connected) return;
+    const shouldPoll = sending || !!conversationState?.pending || delegationCounts.running > 0;
+    if (!shouldPoll) return;
+
+    const tick = async () => {
+      if (historyFetchInFlightRef.current) return;
+      historyFetchInFlightRef.current = true;
+      try {
+        await loadHistory(false, true);
+      } finally {
+        historyFetchInFlightRef.current = false;
+      }
+    };
+
+    void tick();
+    const timerId = window.setInterval(() => {
+      void tick();
+    }, 3500);
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [connected, sending, conversationState?.pending, delegationCounts.running, loadHistory]);
+
+  useEffect(() => {
+    if (!conversationState) return;
+    const sentAtMs = toEpochMs(conversationState.lastSentAt);
+    if (!sentAtMs) return;
+
+    const latestAssistant = [...messages]
+      .reverse()
+      .find((item) => item.role === 'assistant' && toEpochMs(item.timestamp) >= sentAtMs - 1200);
+
+    const latestAssistantTs = toEpochMs(latestAssistant?.timestamp);
+    const storedAssistantTs = toEpochMs(conversationState.lastAssistantAt);
+    if (
+      latestAssistant &&
+      (
+        conversationState.pending ||
+        conversationState.interrupted ||
+        latestAssistantTs > storedAssistantTs + 500
+      )
+    ) {
+      markConversationProgress({
+        sessionKey,
+        assistantAt: latestAssistant.timestamp,
+        assistantSnippet: clipText(latestAssistant.content, 280),
+      });
+      return;
+    }
+
+    if (!conversationState.pending) return;
+
+    const ageMs = Date.now() - sentAtMs;
+    if (!sessionRunning && ageMs > 35_000) {
+      markConversationInterrupted({
+        sessionKey,
+        reason: 'No assistant reply detected and session is no longer running.',
+      });
+      return;
+    }
+    if (ageMs > 180_000) {
+      markConversationInterrupted({
+        sessionKey,
+        reason: 'No assistant reply detected for 3 minutes.',
+      });
+    }
+  }, [
+    conversationState,
+    messages,
+    sessionKey,
+    sessionRunning,
+    markConversationProgress,
+    markConversationInterrupted,
+  ]);
 
   const handleRefresh = async () => {
     if (!connected || refreshing) return;
@@ -2042,9 +2595,18 @@ export function TeamMonitorPage() {
     }
   };
 
-  const handleSend = async () => {
-    const trimmed = input.trim();
-    if (!connected || sending || !trimmed || !activeLeadDef) return;
+  const dispatchLeadRequest = async ({
+    rawPrompt,
+    visiblePrompt,
+    trackingRequest,
+  }: {
+    rawPrompt: string;
+    visiblePrompt?: string;
+    trackingRequest?: string;
+  }) => {
+    const trimmedRaw = rawPrompt.trim();
+    const trimmedVisible = (visiblePrompt || rawPrompt).trim();
+    if (!connected || sending || !trimmedRaw || !activeLeadDef) return;
 
     const sentAt = new Date().toISOString();
     setMessages((prev) => [
@@ -2052,44 +2614,307 @@ export function TeamMonitorPage() {
       {
         id: `local-${Date.now()}`,
         role: 'user',
-        content: trimmed,
+        content: trimmedVisible,
         timestamp: sentAt,
       },
     ]);
     stickyScrollRef.current = true;
     forceScrollRef.current = true;
-    setInput('');
     setSending(true);
     setNotice(null);
+    markConversationPending({
+      sessionKey,
+      leadAgentId: activeLead?.agentId || activeLeadDef.openclawAgentId,
+      userRequest: trackingRequest || trimmedVisible,
+      sentAt,
+    });
 
-    const charter = buildTeamCharter(activeLeadDef, profiles, teamDefs, teamInteractions, resolvedAgentByKey);
+    const charter = buildTeamCharter(
+      activeLeadDef,
+      profiles,
+      teamDefs,
+      teamInteractions,
+      resolvedAgentByKey,
+      leadAllowedAgentIds,
+    );
     const firstMessage = !primedSessionsRef.current.has(sessionKey);
     const outgoing = firstMessage
-      ? `${charter}\n\n[USER_REQUEST]\n${trimmed}\n[/USER_REQUEST]`
-      : trimmed;
+      ? `${charter}\n\n[USER_REQUEST]\n${trimmedRaw}\n[/USER_REQUEST]`
+      : trimmedRaw;
 
     try {
       await gateway.sendMessage(outgoing, undefined, sessionKey);
       primedSessionsRef.current.add(sessionKey);
 
       let gotAssistant = false;
+      let latestHistory: TeamChatMessage[] = [];
+      const sentAtMs = toEpochMs(sentAt);
       for (let i = 0; i < 16; i += 1) {
         await sleep(1500);
-        const latest = await loadHistory(false);
-        gotAssistant = latest.some((msg) => msg.role === 'assistant' && toEpochMs(msg.timestamp) >= toEpochMs(sentAt));
+        latestHistory = await loadHistory(false);
+        gotAssistant = latestHistory.some(
+          (msg) => msg.role === 'assistant' && toEpochMs(msg.timestamp) >= sentAtMs - 1200,
+        );
         if (gotAssistant) break;
       }
 
-      if (!gotAssistant) {
-        setNotice({ type: 'info', text: 'Request sent. Agent is still running; press Refresh to sync latest output.' });
+      if (gotAssistant) {
+        const latestAssistant = [...latestHistory]
+          .reverse()
+          .find((item) => item.role === 'assistant' && toEpochMs(item.timestamp) >= sentAtMs - 1200);
+        markConversationProgress({
+          sessionKey,
+          assistantAt: latestAssistant?.timestamp,
+          assistantSnippet: latestAssistant ? clipText(latestAssistant.content, 280) : undefined,
+        });
+      } else {
+        setNotice({
+          type: 'info',
+          text: 'Request sent. Waiting for assistant output. If this run is interrupted, Resume will appear automatically.',
+        });
       }
     } catch (err: any) {
-      setNotice({ type: 'error', text: err?.message || String(err) });
+      const reason = err?.message || String(err);
+      setNotice({ type: 'error', text: reason });
+      markConversationInterrupted({ sessionKey, reason });
       await loadHistory(false);
     } finally {
       setSending(false);
     }
   };
+
+  const handleSend = async () => {
+    const trimmed = input.trim();
+    if (!trimmed) return;
+    setInput('');
+    await dispatchLeadRequest({ rawPrompt: trimmed, trackingRequest: trimmed });
+  };
+
+  const handleResume = async () => {
+    if (!conversationState || !conversationState.interrupted) return;
+    const lastRequest = compactText(conversationState.lastUserRequest || '');
+    if (!lastRequest) return;
+
+    const resumeEnvelope = buildResumePrompt(
+      lastRequest,
+      conversationState.interruptionReason,
+      conversationState.lastAssistantSnippet,
+    );
+    const resumePrompt = `${resumeEnvelope}\n\n${lastRequest}`;
+    await dispatchLeadRequest({
+      rawPrompt: resumePrompt,
+      visiblePrompt: `Resume: ${clipText(lastRequest, 140)}`,
+      trackingRequest: lastRequest,
+    });
+  };
+
+  const handleDismissResume = () => {
+    clearConversationState(sessionKey);
+  };
+
+  const handleRetryOneDelegation = async (
+    run: DelegationRun,
+    options?: { auto?: boolean },
+  ): Promise<boolean> => {
+    if (!run.agentId || !run.task) {
+      if (!options?.auto) {
+        setNotice({ type: 'error', text: 'Cannot retry this delegation: missing agentId or task payload.' });
+      }
+      return false;
+    }
+    const prompt = [
+      '[TEAM_STUDIO_DELEGATION_RETRY]',
+      options?.auto
+        ? 'Auto-retry this timed-out delegation exactly once after cooldown.'
+        : 'Retry this timed-out delegation only.',
+      `agentId: ${run.agentId}`,
+      `task: ${run.task}`,
+      'Use sessions_spawn in mode=run and preserve the same task intent.',
+      'After spawn, wait for completion callback and summarize outcome.',
+      '[/TEAM_STUDIO_DELEGATION_RETRY]',
+    ].join('\n');
+    if (!options?.auto) {
+      setNotice({ type: 'info', text: `Retrying timed-out delegation for ${run.agentTitle}...` });
+    }
+    await dispatchLeadRequest({
+      rawPrompt: prompt,
+      visiblePrompt: options?.auto ? `Auto-retry timed-out: ${run.agentTitle}` : `Retry timed-out: ${run.agentTitle}`,
+      trackingRequest: `${options?.auto ? 'Auto-retry' : 'Retry'} timed-out delegation for ${run.agentId}`,
+    });
+    return true;
+  };
+
+  const handleRetryFailedDelegations = async () => {
+    if (failedDelegations.length === 0) return;
+    const rows = failedDelegations
+      .map(
+        (run, idx) =>
+          `${idx + 1}. status=${run.status} | agentId=${run.agentId || 'unknown'} | task=${run.task || 'missing task'} | issue=${run.errorText || '-'}`,
+      )
+      .join('\n');
+    const prompt = [
+      '[TEAM_STUDIO_DELEGATION_RETRY]',
+      `Recover failed delegations listed below (${failedDelegations.length} items).`,
+      'Rules:',
+      '- Process only these items.',
+      '- For timed_out/failed: retry with same agentId and same task intent using sessions_spawn mode=run.',
+      '- For blocked: do not spawn blocked agent directly; reroute via COO (team-coo-operations) or another allowed delegate.',
+      '- Report each new childSessionKey and runId.',
+      '- Wait for completion callbacks and then provide final summary.',
+      `Failed delegations:\n${rows}`,
+      '[/TEAM_STUDIO_DELEGATION_RETRY]',
+    ].join('\n');
+    await dispatchLeadRequest({
+      rawPrompt: prompt,
+      visiblePrompt: `Recover failed delegations (${failedDelegations.length})`,
+      trackingRequest: `Recover ${failedDelegations.length} failed delegations`,
+    });
+  };
+
+  const handleRerouteBlockedDelegation = async (run: DelegationRun) => {
+    if (run.status !== 'blocked') return;
+    const blockedAgentId = compactText(run.agentId);
+    const blockedTask = compactText(run.task);
+    if (!blockedAgentId || !blockedTask) {
+      setNotice({ type: 'error', text: 'Cannot reroute blocked delegation: missing agentId or task.' });
+      return;
+    }
+
+    const cooDef = teamDefs.find((def) => def.key === 'coo');
+    const cooAgentId = cooDef ? (resolvedAgentByKey.get(cooDef.key) || cooDef.openclawAgentId) : '';
+    const canUseCoo = !!cooAgentId && leadAllowedAgentIds.includes(cooAgentId);
+    const fallbackAllowed = leadAllowedAgentIds[0] || '';
+    const relayAgentId = canUseCoo ? cooAgentId : fallbackAllowed;
+    if (!relayAgentId) {
+      setNotice({ type: 'error', text: 'No allowed relay agent available for reroute.' });
+      return;
+    }
+
+    const prompt = [
+      '[TEAM_STUDIO_DELEGATION_REROUTE]',
+      `Previous delegation was blocked by sessions_spawn policy for direct agentId=${blockedAgentId}.`,
+      `Use allowed relay agentId=${relayAgentId} to execute the same intent.`,
+      'Rules:',
+      '- Keep the original task intent and output format.',
+      '- Use sessions_spawn mode=run for relay agent.',
+      `- Instruct relay agent to delegate internally to ${blockedAgentId} if policy allows at relay level; otherwise complete directly.`,
+      `Original task: ${blockedTask}`,
+      'Return: relay runId, childSessionKey, and final completion summary.',
+      '[/TEAM_STUDIO_DELEGATION_REROUTE]',
+    ].join('\n');
+
+    setNotice({ type: 'info', text: `Rerouting blocked delegation via ${relayAgentId}...` });
+    await dispatchLeadRequest({
+      rawPrompt: prompt,
+      visiblePrompt: `Reroute blocked delegation: ${run.agentTitle}`,
+      trackingRequest: `Reroute blocked delegation for ${blockedAgentId} via ${relayAgentId}`,
+    });
+  };
+
+  useEffect(() => {
+    if (!connected) return;
+
+    // Drop timers for intents that are no longer timed out.
+    autoRetryTimersRef.current.forEach((timerId, intentKey) => {
+      const latest = latestDelegationByIntent.get(intentKey);
+      if (!latest || latest.status !== 'timed_out') {
+        window.clearTimeout(timerId);
+        autoRetryTimersRef.current.delete(intentKey);
+      }
+    });
+
+    // Reset retry state once an intent leaves timed-out state, so future timeout
+    // cycles can still get one automatic retry.
+    setAutoRetryMeta((prev) => {
+      let changed = false;
+      const next: Record<string, AutoRetryMetaEntry> = {};
+      Object.entries(prev).forEach(([intentKey, meta]) => {
+        const latest = latestDelegationByIntent.get(intentKey);
+        if (latest && latest.status === 'timed_out') {
+          next[intentKey] = meta;
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+
+    latestDelegationByIntent.forEach((run, intentKey) => {
+      if (run.status !== 'timed_out') return;
+
+      const meta = autoRetryMeta[intentKey] || { attempts: 0, finalTimeout: false };
+      if (meta.attempts >= 1) {
+        const runStartedAt = toEpochMs(run.spawnedAt);
+        const retryAt = Number(meta.lastRetryAt || 0);
+        // Ignore the original timed-out run right after scheduling auto-retry.
+        if (retryAt > 0 && (!runStartedAt || runStartedAt <= retryAt + 1000)) {
+          return;
+        }
+        if (!meta.finalTimeout) {
+          setAutoRetryMeta((prev) => ({
+            ...prev,
+            [intentKey]: {
+              attempts: prev[intentKey]?.attempts || 1,
+              lastRetryAt: prev[intentKey]?.lastRetryAt,
+              finalTimeout: true,
+            },
+          }));
+        }
+        return;
+      }
+
+      if (autoRetryTimersRef.current.has(intentKey)) return;
+
+      const timerId = window.setTimeout(async () => {
+        autoRetryTimersRef.current.delete(intentKey);
+        const latestNow = latestDelegationByIntentRef.current.get(intentKey);
+        if (!latestNow || latestNow.status !== 'timed_out') return;
+
+        if (sending) {
+          // UI is busy; try once more shortly.
+          if (!autoRetryTimersRef.current.has(intentKey)) {
+            const delayed = window.setTimeout(async () => {
+              autoRetryTimersRef.current.delete(intentKey);
+              const latestAgain = latestDelegationByIntentRef.current.get(intentKey);
+              if (!latestAgain || latestAgain.status !== 'timed_out') return;
+              if (sending) return;
+              const started = await handleRetryOneDelegation(latestAgain, { auto: true });
+              if (started) {
+                setAutoRetryMeta((prev) => ({
+                  ...prev,
+                  [intentKey]: {
+                    attempts: 1,
+                    lastRetryAt: Date.now(),
+                    finalTimeout: false,
+                  },
+                }));
+              }
+            }, 3000);
+            autoRetryTimersRef.current.set(intentKey, delayed);
+          }
+          return;
+        }
+
+        const started = await handleRetryOneDelegation(latestNow, { auto: true });
+        if (started) {
+          setAutoRetryMeta((prev) => ({
+            ...prev,
+            [intentKey]: {
+              attempts: 1,
+              lastRetryAt: Date.now(),
+              finalTimeout: false,
+            },
+          }));
+          setNotice({
+            type: 'info',
+            text: `Auto-retry triggered for timed-out delegation: ${latestNow.agentTitle}`,
+          });
+        }
+      }, AUTO_RETRY_COOLDOWN_MS);
+
+      autoRetryTimersRef.current.set(intentKey, timerId);
+    });
+  }, [connected, latestDelegationByIntent, autoRetryMeta, sending, handleRetryOneDelegation]);
 
   const handleLearnProfileFromConversation = async (key: string, currentDraft: RoleDraft): Promise<RoleDraft | null> => {
     if (!connected) {
@@ -2524,28 +3349,28 @@ export function TeamMonitorPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 shrink-0">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 shrink-0">
         {[
           { icon: Users2, label: 'Team roles', value: teamDefs.length, color: 'primary' as const },
           { icon: ShieldCheck, label: 'Provisioned', value: resolvedMembers.filter((m) => !!m.agent || m.definition.fixed).length, color: 'success' as const },
           { icon: Activity, label: 'Active runtime', value: activeRuntimeCount, color: 'accent' as const },
           { icon: Bot, label: 'Running sub-agents', value: teamRunningSubAgents.length, color: 'warning' as const },
         ].map((item, idx) => (
-          <GlassCard key={item.label} delay={idx * 0.03} hover>
-            <div className="flex items-center gap-3">
-              <div
-                className="w-10 h-10 rounded-xl border flex items-center justify-center"
-                style={{
-                  background: themeAlpha(item.color, 0.1),
-                  borderColor: themeAlpha(item.color, 0.2),
-                  color: themeHex(item.color),
-                }}
-              >
-                <item.icon size={16} />
-              </div>
-              <div>
-                <div className="text-[20px] font-bold text-aegis-text">{item.value}</div>
-                <div className="text-[11px] text-aegis-text-dim">{item.label}</div>
+          <GlassCard key={item.label} delay={idx * 0.03} hover noPad>
+            <div className="px-3.5 py-2.5">
+              <div className="flex w-full items-center">
+                <div
+                  className="w-8 h-8 shrink-0 rounded-lg border flex items-center justify-center ml-5 mr-[10px]"
+                  style={{
+                    background: themeAlpha(item.color, 0.1),
+                    borderColor: themeAlpha(item.color, 0.2),
+                    color: themeHex(item.color),
+                  }}
+                >
+                  <item.icon size={14} />
+                </div>
+                <div className="min-w-0 flex-1 ml-0 mr-[12px] text-[14px] font-semibold leading-tight text-aegis-text truncate">{item.label}</div>
+                <div className="text-[24px] leading-none font-extrabold tabular-nums text-aegis-text ml-[8px] mr-5">{item.value}</div>
               </div>
             </div>
           </GlassCard>
@@ -2613,12 +3438,48 @@ export function TeamMonitorPage() {
                   />
                 </label>
               </div>
+              <div className="text-[10px] text-aegis-text-dim">
+                Delegation policy:
+                {' '}
+                {leadAllowedSummary || 'No explicit allow-list found for this lead agent.'}
+              </div>
             </div>
 
             <div className="px-4 pt-4 min-h-0 overflow-hidden">
               {showLayoutDebug && (layoutDebug.middleHeight <= 0 || layoutDebug.chatClientHeight <= 0) && (
                 <div className="mb-2 rounded-lg border border-aegis-danger/30 bg-aegis-danger/10 px-2.5 py-2 text-[11px] text-aegis-danger">
                   Debug: scroll region collapsed (mid={layoutDebug.middleHeight}px, chat={layoutDebug.chatClientHeight}px).
+                </div>
+              )}
+              {conversationState?.interrupted && (
+                <div className="mb-2 rounded-lg border border-aegis-warning/30 bg-aegis-warning/10 px-3 py-2">
+                  <div className="text-[11px] font-semibold text-aegis-warning">Conversation interrupted</div>
+                  <div className="text-[10px] text-aegis-text-dim mt-0.5">
+                    {conversationState.interruptionReason || 'The previous run did not complete.'}
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleResume}
+                      disabled={sending}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-aegis-warning/30 bg-aegis-warning/15 px-2.5 py-1 text-[10px] font-semibold text-aegis-warning disabled:opacity-50"
+                    >
+                      <RotateCcw size={11} />
+                      Resume
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDismissResume}
+                      className="rounded-md border border-[rgb(var(--aegis-overlay)/0.15)] px-2 py-1 text-[10px] text-aegis-text-dim hover:text-aegis-text"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              )}
+              {conversationState?.pending && !conversationState.interrupted && (
+                <div className="mb-2 rounded-lg border border-aegis-primary/25 bg-aegis-primary/10 px-2.5 py-1.5 text-[10px] text-aegis-primary">
+                  Request in progress{sessionRunning ? ' (session running)' : ''}. Sent {timeAgo(conversationState.lastSentAt)}.
                 </div>
               )}
               <div
@@ -2736,6 +3597,147 @@ export function TeamMonitorPage() {
                     </div>
                     <div className="text-[10px] text-aegis-text-dim font-mono mt-1 truncate">{session.key}</div>
                     <div className="text-[10px] text-aegis-text-dim mt-1">last active: {timeAgo(session?.lastActive || session?.updatedAt)}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </GlassCard>
+
+          <GlassCard noPad>
+            <div className="p-5 pb-3 border-b border-[rgb(var(--aegis-overlay)/0.06)] flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[15px] font-bold text-aegis-text">Delegation Tracker</div>
+                <p className="text-[12px] text-aegis-text-dim mt-1">
+                  sessions_spawn runs and callback status for this Team Dialog session.
+                </p>
+              </div>
+              <div className="text-[10px] text-aegis-text-dim text-end leading-4">
+                <div>Run {delegationCounts.running}</div>
+                <div>Done {delegationCounts.completed}</div>
+                <div>Fail {delegationCounts.failed + delegationCounts.timed_out + delegationCounts.blocked}</div>
+                {recoveredDelegationCount > 0 && <div>Recovered {recoveredDelegationCount}</div>}
+                <div>{historyFresh ? 'Live' : 'Stale'}</div>
+              </div>
+            </div>
+            <div className="px-4 pt-3 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={handleRetryFailedDelegations}
+                disabled={!connected || sending || failedDelegations.length === 0}
+                className={clsx(
+                  'rounded-md border px-2.5 py-1 text-[10px] font-semibold',
+                  failedDelegations.length > 0
+                    ? 'border-aegis-warning/30 bg-aegis-warning/10 text-aegis-warning'
+                    : 'border-[rgb(var(--aegis-overlay)/0.12)] text-aegis-text-dim',
+                )}
+              >
+                Retry Failed ({failedDelegations.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowDelegationHistory((prev) => !prev)}
+                className="rounded-md border border-[rgb(var(--aegis-overlay)/0.12)] px-2.5 py-1 text-[10px] font-semibold text-aegis-text-dim"
+              >
+                {showDelegationHistory ? 'Hide History' : 'Show History'}
+              </button>
+            </div>
+            <div className="p-4 space-y-2 max-h-[320px] overflow-y-auto scrollbar-thin">
+              {delegationRunsForDisplay.length === 0 && (
+                <div className="text-[11px] text-aegis-text-dim py-4 text-center">
+                  {recoveredDelegationCount > 0
+                    ? 'No active failures. Previous failed runs were superseded by later completions.'
+                    : 'No delegation activity yet in this session.'}
+                </div>
+              )}
+              {delegationRunsForDisplay.map((run) => {
+                const intentKey = run.intentKey || run.key;
+                const latestForIntent = latestDelegationByIntent.get(intentKey);
+                const isLatestForIntent = latestForIntent?.key === run.key;
+                const isFinalTimeout = run.status === 'timed_out' && isLatestForIntent && !!autoRetryMeta[intentKey]?.finalTimeout;
+                const statusMeta = isFinalTimeout
+                  ? { label: 'FINAL TIMEOUT', className: 'text-aegis-danger border-aegis-danger/25 bg-aegis-danger/10' }
+                  : delegationStatusMeta(run.status);
+                const startedAt = toEpochMs(run.spawnedAt);
+                const completedAt = toEpochMs(run.completedAt);
+                const durationSec = run.runtimeSeconds || (
+                  startedAt && completedAt && completedAt > startedAt
+                    ? Math.round((completedAt - startedAt) / 1000)
+                    : 0
+                );
+                return (
+                  <div
+                    key={run.key}
+                    className="rounded-lg border border-[rgb(var(--aegis-overlay)/0.08)] p-2.5 bg-[rgb(var(--aegis-overlay)/0.02)]"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-semibold text-aegis-text truncate">
+                          {run.agentTitle}
+                        </div>
+                        <div className="text-[10px] text-aegis-text-dim font-mono truncate mt-0.5">
+                          {run.runId || 'run id unavailable'}
+                        </div>
+                      </div>
+                      <span className={clsx('text-[9px] px-1.5 py-0.5 rounded-md border', statusMeta.className)}>
+                        {statusMeta.label}
+                      </span>
+                    </div>
+
+                    {!!run.task && (
+                      <div className="text-[10px] text-aegis-text-dim mt-1.5 line-clamp-2">
+                        task: {run.task}
+                      </div>
+                    )}
+                    {!!run.childSessionKey && (
+                      <div className="text-[10px] text-aegis-text-dim font-mono mt-1 truncate">
+                        {run.childSessionKey}
+                      </div>
+                    )}
+
+                    <div className="text-[10px] text-aegis-text-dim mt-1">
+                      started {timeAgo(run.spawnedAt)}
+                      {durationSec > 0 ? ` · runtime ${durationSec}s` : ''}
+                    </div>
+
+                    {!!run.resultSnippet && (
+                      <div className="text-[10px] text-aegis-success mt-1 line-clamp-2">
+                        result: {run.resultSnippet}
+                      </div>
+                    )}
+                    {!!run.errorText && (
+                      <div className="text-[10px] text-aegis-danger mt-1 line-clamp-2">
+                        issue: {run.errorText}
+                      </div>
+                    )}
+                    {isFinalTimeout && (
+                      <div className="text-[10px] text-aegis-danger mt-1">
+                        auto-retry exhausted (1 attempt). Manual retry required.
+                      </div>
+                    )}
+                    {run.status === 'timed_out' && (
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleRetryOneDelegation(run)}
+                          disabled={!connected || sending}
+                          className="rounded-md border border-aegis-warning/30 bg-aegis-warning/10 px-2 py-1 text-[10px] font-semibold text-aegis-warning disabled:opacity-50"
+                        >
+                          Retry This
+                        </button>
+                      </div>
+                    )}
+                    {run.status === 'blocked' && (
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleRerouteBlockedDelegation(run)}
+                          disabled={!connected || sending}
+                          className="rounded-md border border-aegis-primary/30 bg-aegis-primary/10 px-2 py-1 text-[10px] font-semibold text-aegis-primary disabled:opacity-50"
+                        >
+                          Reroute
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}

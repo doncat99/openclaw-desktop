@@ -8,8 +8,9 @@ import { CodeBlock } from './CodeBlock';
 import { ChatImage } from './ChatImage';
 import { ChatVideo } from './ChatVideo';
 import { AudioPlayer } from './AudioPlayer';
-import type { ChatMessage } from '@/stores/chatStore';
+import { useChatStore, type ChatMessage } from '@/stores/chatStore';
 import { autoDetectCode } from '@/utils/autoDetectCode';
+import { getAgentTagForSession } from './agentIdentity';
 import clsx from 'clsx';
 
 // ── Artifact Parser ──
@@ -180,6 +181,8 @@ const markdownComponents = {
 
 export const MessageBubble = memo(function MessageBubble({ message, onResend }: MessageBubbleProps) {
   const { t, i18n } = useTranslation();
+  const activeSessionKey = useChatStore((s) => s.activeSessionKey);
+  const sessions = useChatStore((s) => s.sessions);
   const [copied, setCopied] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const isUser = message.role === 'user';
@@ -213,6 +216,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onResend }: 
   };
 
   const rawContent = extractText(message.content);
+  const assistantTag = getAgentTagForSession(activeSessionKey, sessions, rawContent);
 
   const cleanContent = isUser
     ? rawContent.replace(/^\[.*?\]\s*/, '').replace(/\n\[message_id:.*?\]$/, '')
@@ -247,7 +251,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onResend }: 
         </div>
       ) : (
         <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-aegis-primary to-aegis-accent flex items-center justify-center shrink-0 mt-0.5 shadow-glow-sm">
-          <span className="text-[10px] font-bold text-aegis-text">A</span>
+          <span className="text-[9px] font-bold tracking-[0.2px] text-aegis-text">{assistantTag}</span>
         </div>
       )}
 

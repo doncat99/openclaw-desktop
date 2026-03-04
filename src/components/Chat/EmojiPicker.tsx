@@ -17,10 +17,16 @@ interface EmojiPickerProps {
 }
 
 export function EmojiPicker({ onSelect, disabled }: EmojiPickerProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { language, theme } = useSettingsStore();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const pickerLocale = (() => {
+    const lang = String(i18n.resolvedLanguage || i18n.language || 'en').toLowerCase();
+    if (lang.startsWith('ar')) return 'ar';
+    if (lang.startsWith('zh')) return 'zh';
+    return 'en';
+  })();
 
   // Close on outside click
   useEffect(() => {
@@ -76,7 +82,7 @@ export function EmojiPicker({ onSelect, disabled }: EmojiPickerProps) {
                 setOpen(false);
               }}
               theme={theme === 'aegis-light' ? 'light' : 'dark'}
-              locale={language}
+              locale={pickerLocale}
               previewPosition="none"
               skinTonePosition="search"
               maxFrequentRows={2}

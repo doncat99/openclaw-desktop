@@ -218,6 +218,14 @@ push_with_retry() {
     return $?
   fi
 
+  if printf '%s\n' "$push_output" | grep -Eq "non-fast-forward|tip of your current branch is behind"; then
+    if [[ "$CURRENT_BRANCH" == codex/* || "$HISTORY_REPAIRED" == "1" ]]; then
+      echo "[pr-auto] Non-fast-forward on automation branch. Retrying with --force-with-lease..."
+      SKIP_CODEX_REVIEW=1 git push --force-with-lease -u "$REMOTE" "$CURRENT_BRANCH"
+      return $?
+    fi
+  fi
+
   return $rc
 }
 

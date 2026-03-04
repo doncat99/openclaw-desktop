@@ -418,6 +418,11 @@
   "settings": {
     "title": "Settings",
     "language": "Language",
+    "languageAuto": "Auto Detect",
+    "languageAutoHint": "Auto Detect follows your current system/Codex locale.",
+    "languageEnglish": "English",
+    "languageArabic": "Arabic",
+    "languageChinese": "Chinese",
     "notifications": "Notifications",
     "enableNotifications": "Enable Notifications",
     "notificationsDesc": "Desktop notifications when messages arrive",
@@ -530,7 +535,7 @@
     "reconnect": "Reconnect",
     "connectGateway": "Connect to Gateway",
     "toggleTheme": "Toggle Theme",
-    "toggleLanguage": "Switch to Arabic",
+    "toggleLanguage": "Cycle Language",
     "toggleNotifications": "Toggle Notifications",
     "searchPlaceholder": "Search commands..."
   },

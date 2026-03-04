@@ -48,10 +48,24 @@ export interface TeamEvolutionProposal {
   rejectedAt?: string;
 }
 
+export interface TeamDialogResumeState {
+  sessionKey: string;
+  leadAgentId: string;
+  pending: boolean;
+  interrupted: boolean;
+  lastUserRequest: string;
+  lastSentAt: string;
+  lastAssistantAt?: string;
+  lastAssistantSnippet?: string;
+  interruptionReason?: string;
+  attempts: number;
+}
+
 interface TeamStudioState {
   leadAgentId: string;
   profiles: Record<string, TeamAgentProfile>;
   proposals: TeamEvolutionProposal[];
+  conversationStates: Record<string, TeamDialogResumeState>;
   setLeadAgentId: (agentId: string) => void;
   syncFromDefinitions: (definitions?: TeamMemberDefinition[]) => void;
   updateProfile: (
@@ -66,6 +80,24 @@ interface TeamStudioState {
     reviewNote?: string,
   ) => void;
   removeProposal: (proposalId: string) => void;
+  markConversationPending: (params: {
+    sessionKey: string;
+    leadAgentId: string;
+    userRequest: string;
+    sentAt?: string;
+  }) => void;
+  markConversationProgress: (params: {
+    sessionKey: string;
+    assistantAt?: string;
+    assistantSnippet?: string;
+  }) => void;
+  markConversationInterrupted: (params: {
+    sessionKey: string;
+    reason: string;
+    assistantAt?: string;
+    assistantSnippet?: string;
+  }) => void;
+  clearConversationState: (sessionKey: string) => void;
 }
 
 function toProfile(def: TeamMemberDefinition): TeamAgentProfile {
@@ -98,6 +130,7 @@ export const useTeamStudioStore = create<TeamStudioState>()(
       leadAgentId: defaultLeadAgentId(),
       profiles: defaultProfiles(getTeamDefinitions()),
       proposals: [],
+      conversationStates: {},
 
       setLeadAgentId: (agentId) => set({ leadAgentId: agentId }),
 
@@ -180,6 +213,75 @@ export const useTeamStudioStore = create<TeamStudioState>()(
         set((state) => ({
           proposals: state.proposals.filter((item) => item.id !== proposalId),
         })),
+
+      markConversationPending: ({ sessionKey, leadAgentId, userRequest, sentAt }) =>
+        set((state) => {
+          const current = state.conversationStates[sessionKey];
+          const nextAttempts = (current?.attempts || 0) + 1;
+          return {
+            conversationStates: {
+              ...state.conversationStates,
+              [sessionKey]: {
+                sessionKey,
+                leadAgentId,
+                pending: true,
+                interrupted: false,
+                lastUserRequest: userRequest,
+                lastSentAt: sentAt || new Date().toISOString(),
+                lastAssistantAt: current?.lastAssistantAt,
+                lastAssistantSnippet: current?.lastAssistantSnippet,
+                interruptionReason: '',
+                attempts: nextAttempts,
+              },
+            },
+          };
+        }),
+
+      markConversationProgress: ({ sessionKey, assistantAt, assistantSnippet }) =>
+        set((state) => {
+          const current = state.conversationStates[sessionKey];
+          if (!current) return state;
+          return {
+            conversationStates: {
+              ...state.conversationStates,
+              [sessionKey]: {
+                ...current,
+                pending: false,
+                interrupted: false,
+                lastAssistantAt: assistantAt || current.lastAssistantAt,
+                lastAssistantSnippet: assistantSnippet || current.lastAssistantSnippet,
+                interruptionReason: '',
+              },
+            },
+          };
+        }),
+
+      markConversationInterrupted: ({ sessionKey, reason, assistantAt, assistantSnippet }) =>
+        set((state) => {
+          const current = state.conversationStates[sessionKey];
+          if (!current) return state;
+          return {
+            conversationStates: {
+              ...state.conversationStates,
+              [sessionKey]: {
+                ...current,
+                pending: false,
+                interrupted: true,
+                interruptionReason: reason,
+                lastAssistantAt: assistantAt || current.lastAssistantAt,
+                lastAssistantSnippet: assistantSnippet || current.lastAssistantSnippet,
+              },
+            },
+          };
+        }),
+
+      clearConversationState: (sessionKey) =>
+        set((state) => {
+          if (!state.conversationStates[sessionKey]) return state;
+          const next = { ...state.conversationStates };
+          delete next[sessionKey];
+          return { conversationStates: next };
+        }),
     }),
     {
       name: TEAM_STUDIO_KEY,

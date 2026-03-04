@@ -12,13 +12,14 @@ import { APP_VERSION } from '@/hooks/useAppVersion';
 import { GlassCard } from '@/components/shared/GlassCard';
 import { PageTransition } from '@/components/shared/PageTransition';
 import { StatusDot } from '@/components/shared/StatusDot';
-import { useSettingsStore } from '@/stores/settingsStore';
+import { type AppLanguage, useSettingsStore } from '@/stores/settingsStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useGatewayDataStore } from '@/stores/gatewayDataStore';
 import { gateway } from '@/services/gateway';
 import { notifications } from '@/services/notifications';
 import { changeLanguage } from '@/i18n';
 import clsx from 'clsx';
+import neuraLogo from '../../assets/logo.png';
 
 export function SettingsPageFull() {
   const { t } = useTranslation();
@@ -50,7 +51,7 @@ export function SettingsPageFull() {
   const mainModel = mainSession?.model || '—';
   const contextTokens = mainSession?.contextTokens || 0;
 
-  const handleLanguageChange = (lang: 'ar' | 'en') => {
+  const handleLanguageChange = (lang: AppLanguage) => {
     setLanguage(lang);
     changeLanguage(lang);
   };
@@ -173,17 +174,17 @@ export function SettingsPageFull() {
           <Globe size={16} className="text-aegis-primary" />
           {t('settings.language')}
         </h3>
-        <div className="flex items-center gap-3">
+        <div className="grid grid-cols-2 gap-3">
           <button
-            onClick={() => handleLanguageChange('ar')}
+            onClick={() => handleLanguageChange('auto')}
             className={clsx(
               'flex-1 py-3 rounded-xl text-[14px] font-medium border transition-colors',
-              language === 'ar'
+              language === 'auto'
                 ? 'bg-aegis-primary/15 border-aegis-primary/30 text-aegis-primary'
                 : 'border-aegis-border/20 text-aegis-text-dim hover:border-aegis-border/40'
             )}
           >
-            العربية
+            {t('settings.languageAuto', 'Auto Detect')}
           </button>
           <button
             onClick={() => handleLanguageChange('en')}
@@ -194,9 +195,34 @@ export function SettingsPageFull() {
                 : 'border-aegis-border/20 text-aegis-text-dim hover:border-aegis-border/40'
             )}
           >
-            English
+            {t('settings.languageEnglish', 'English')}
+          </button>
+          <button
+            onClick={() => handleLanguageChange('zh')}
+            className={clsx(
+              'flex-1 py-3 rounded-xl text-[14px] font-medium border transition-colors',
+              language === 'zh'
+                ? 'bg-aegis-primary/15 border-aegis-primary/30 text-aegis-primary'
+                : 'border-aegis-border/20 text-aegis-text-dim hover:border-aegis-border/40'
+            )}
+          >
+            {t('settings.languageChinese', '中文')}
+          </button>
+          <button
+            onClick={() => handleLanguageChange('ar')}
+            className={clsx(
+              'flex-1 py-3 rounded-xl text-[14px] font-medium border transition-colors',
+              language === 'ar'
+                ? 'bg-aegis-primary/15 border-aegis-primary/30 text-aegis-primary'
+                : 'border-aegis-border/20 text-aegis-text-dim hover:border-aegis-border/40'
+            )}
+          >
+            {t('settings.languageArabic', 'العربية')}
           </button>
         </div>
+        <p className="text-[11px] text-aegis-text-dim mt-2">
+          {t('settings.languageAutoHint', 'Auto Detect follows your current system/Codex locale.')}
+        </p>
       </GlassCard>
 
       {/* Theme */}
@@ -573,10 +599,15 @@ export function SettingsPageFull() {
       {/* About + System Info */}
       <GlassCard delay={0.3}>
         <div className="text-center py-4 mb-4">
-          <div className="text-3xl mb-2">Æ</div>
-          <div className="text-[14px] font-bold text-aegis-text">AEGIS Desktop</div>
-          <div className="text-[12px] text-aegis-text-dim mt-1">v{APP_VERSION} — Mission Control</div>
-          <div className="text-[11px] text-aegis-text-dim mt-0.5">Advanced Executive General Intelligence System</div>
+          <img
+            src={neuraLogo}
+            alt="OntoSynth"
+            className="w-12 h-12 mx-auto mb-2 object-contain"
+            draggable={false}
+          />
+          <div className="text-[14px] font-bold text-aegis-text">OntoSynth Desktop</div>
+          <div className="text-[12px] text-aegis-text-dim mt-1">v{APP_VERSION}</div>
+          <div className="text-[11px] text-aegis-text-dim mt-0.5">NeuraEdge Intelligent Operations Workspace</div>
         </div>
         <div className="space-y-2 border-t border-aegis-border/15 pt-3">
           {[
@@ -592,7 +623,7 @@ export function SettingsPageFull() {
           ))}
         </div>
         <button onClick={() => {
-          const info = `AEGIS Desktop v4.0.0\nPlatform: ${navigator.platform}\nModel: ${mainModel}\nGateway: ${connected ? 'connected' : 'disconnected'}`;
+          const info = `OntoSynth Desktop v${APP_VERSION}\nPlatform: ${navigator.platform}\nModel: ${mainModel}\nGateway: ${connected ? 'connected' : 'disconnected'}`;
           navigator.clipboard?.writeText(info);
         }}
           className="mt-3 flex items-center gap-1.5 mx-auto px-3 py-1.5 rounded-lg text-[11px] text-aegis-text-dim hover:text-aegis-text border border-aegis-border/20 hover:border-aegis-border/40 transition-colors">

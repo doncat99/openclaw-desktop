@@ -133,6 +133,10 @@ function accumulateTotals(target: CostTotals, source: Partial<CostTotals>): void
   target.missingCostEntries += source.missingCostEntries || 0;
 }
 
+function fmtDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
 /** Map a preset to the fetch parameters (days for cost, limit for sessions) */
 function getFetchParams(preset: PresetId): { days: number; limit: number } {
   switch (preset) {
@@ -141,6 +145,52 @@ function getFetchParams(preset: PresetId): { days: number; limit: number } {
     case 'thisMonth': return { days: 31,  limit: 200  }; // Months can have 31 days
     default:          return { days: 30,  limit: 200  };
   }
+}
+
+function getPresetRange(preset: PresetId): { start: string; end: string } {
+  const now = new Date();
+  switch (preset) {
+    case 'today': {
+      const d = fmtDate(now);
+      return { start: d, end: d };
+    }
+    case '7d': {
+      const start = new Date(now);
+      start.setDate(now.getDate() - 6);
+      return { start: fmtDate(start), end: fmtDate(now) };
+    }
+    case 'thisMonth':
+      return {
+        start: fmtDate(new Date(now.getFullYear(), now.getMonth(), 1)),
+        end: fmtDate(now),
+      };
+    case '30d': {
+      const start = new Date(now);
+      start.setDate(now.getDate() - 29);
+      return { start: fmtDate(start), end: fmtDate(now) };
+    }
+    case '90d': {
+      const start = new Date(now);
+      start.setDate(now.getDate() - 89);
+      return { start: fmtDate(start), end: fmtDate(now) };
+    }
+    case 'custom':
+    case 'all':
+    default:
+      return { start: '', end: '' };
+  }
+}
+
+function resolveUsageRange(
+  preset: PresetId,
+  startDate: string,
+  endDate: string
+): { startDate?: string; endDate?: string } {
+  if (preset === 'all') return {};
+  const start = String(startDate || '').trim();
+  const end = String(endDate || '').trim();
+  if (!start || !end) return {};
+  return { startDate: start, endDate: end };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -296,7 +346,12 @@ export function useAnalyticsData(): AnalyticsData {
 
   // ── Data fetching ──
   const fetchData = useCallback(
-    async (days = 30, limit = 200, showLoading = true) => {
+    async (
+      days = 30,
+      limit = 200,
+      showLoading = true,
+      usageRange: { startDate?: string; endDate?: string } = {}
+    ) => {
       if (!connected) return;
       if (fetchInFlightRef.current) return;
       fetchInFlightRef.current = true;
@@ -306,7 +361,7 @@ export function useAnalyticsData(): AnalyticsData {
 
         const [costResult, usageResult] = await Promise.allSettled([
           fetchFullCost(days),
-          fetchFullUsage(limit),
+          fetchFullUsage({ limit, ...usageRange }),
         ]);
 
         if (costResult.status === 'fulfilled' && costResult.value) {
@@ -358,10 +413,18 @@ export function useAnalyticsData(): AnalyticsData {
     setSavedPreset(saved);
     setActivePreset(saved);
 
+    let initialStart = '';
+    let initialEnd = '';
     if (saved === 'custom' && savedDates?.start && savedDates?.end) {
-      setStartDate(savedDates.start);
-      setEndDate(savedDates.end);
+      initialStart = savedDates.start;
+      initialEnd = savedDates.end;
+    } else if (saved !== 'all') {
+      const presetRange = getPresetRange(saved);
+      initialStart = presetRange.start;
+      initialEnd = presetRange.end;
     }
+    setStartDate(initialStart);
+    setEndDate(initialEnd);
 
     const hasCached = hydrateFromCache();
     const cachedCost = cacheGet<CostSummary>(CACHE_KEY_FULL_COST);
@@ -370,7 +433,8 @@ export function useAnalyticsData(): AnalyticsData {
 
     if (isStale || !hasCached) {
       const { days, limit } = getFetchParams(saved);
-      fetchData(days, limit, !hasCached);
+      const usageRange = resolveUsageRange(saved, initialStart, initialEnd);
+      fetchData(days, limit, !hasCached, usageRange);
     }
     setHasHydrated(true);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -392,8 +456,9 @@ export function useAnalyticsData(): AnalyticsData {
     lastAutoRefreshAtRef.current = now;
 
     const { days, limit } = getFetchParams(activePreset);
-    void fetchData(days, limit, false);
-  }, [connected, hasHydrated, gatewayTickTs, activePreset, fetchData]);
+    const usageRange = resolveUsageRange(activePreset, startDate, endDate);
+    void fetchData(days, limit, false, usageRange);
+  }, [connected, hasHydrated, gatewayTickTs, activePreset, startDate, endDate, fetchData]);
 
   // Auto-sync OpenRouter prices when we detect unknown-model entries.
   useEffect(() => {
@@ -415,13 +480,12 @@ export function useAnalyticsData(): AnalyticsData {
       // Fetch more data if the new preset needs a wider scope
       const requiredDays = getFetchParams(id).days;
       const currentDays  = costData?.days || 0;
-
-      if (requiredDays > currentDays) {
-        setIsRefetching(true);
-        const { limit } = getFetchParams(id);
-        await fetchData(requiredDays, limit, false);
-        setIsRefetching(false);
-      }
+      const daysToFetch = Math.max(requiredDays, currentDays || 0);
+      const { limit } = getFetchParams(id);
+      const usageRange = resolveUsageRange(id, start, end);
+      setIsRefetching(true);
+      await fetchData(daysToFetch || requiredDays, limit, false, usageRange);
+      setIsRefetching(false);
     },
     [costData, fetchData]
   );
@@ -447,11 +511,10 @@ export function useAnalyticsData(): AnalyticsData {
             (1000 * 60 * 60 * 24)
         );
         const currentDays = costData?.days || 0;
-        if (dayDiff > currentDays) {
-          setIsRefetching(true);
-          await fetchData(365, 2000, false);
-          setIsRefetching(false);
-        }
+        const daysToFetch = Math.max(dayDiff, currentDays || 0, 30);
+        setIsRefetching(true);
+        await fetchData(daysToFetch, 2000, false, { startDate: customStart, endDate: customEnd });
+        setIsRefetching(false);
       } else {
         // Preset save (no custom dates)
         localStorage.setItem(PRESET_STORAGE_KEY, activePreset);
@@ -569,28 +632,36 @@ export function useAnalyticsData(): AnalyticsData {
   const sessions = useMemo(() => {
     if (!startDate && !endDate) return allSessions;
     return allSessions.filter((s) => {
-      const updated = s.updatedAt
-        ? new Date(s.updatedAt).toISOString().slice(0, 10)
-        : '';
-      return isInRange(updated);
+      const activityDates = Array.isArray((s as any)?.usage?.activityDates)
+        ? (s as any).usage.activityDates.map((d: any) => String(d || '').slice(0, 10)).filter(Boolean)
+        : [];
+      if (activityDates.length > 0) {
+        return activityDates.some((d: string) => isInRange(d));
+      }
+      const updated = s.updatedAt ? new Date(s.updatedAt).toISOString().slice(0, 10) : '';
+      const created = s.createdAt ? new Date(s.createdAt).toISOString().slice(0, 10) : '';
+      return (updated && isInRange(updated)) || (created && isInRange(created));
     });
   }, [allSessions, isInRange, startDate, endDate]);
 
   const byAgent = useMemo<ByAgentEntry[]>(() => {
     if (activePreset === 'all') return aggregates?.byAgent || [];
+    const aggregateByAgent = Array.isArray(aggregates?.byAgent) ? aggregates.byAgent : [];
+    if (aggregateByAgent.length > 0) return aggregateByAgent;
     const map = new Map<string, CostTotals>();
     for (const s of sessions) {
       const aid      = (s as any).agentId || 'unknown';
       const existing = map.get(aid) || { ...EMPTY_TOTALS };
-      const patchedUsage = patchUsageWithPricing((s as any).usage || {}, (s as any).model);
-      accumulateTotals(existing, patchedUsage);
+      accumulateTotals(existing, (s as any).usage || {});
       map.set(aid, existing);
     }
     return Array.from(map.entries()).map(([agentId, t]) => ({ agentId, totals: t }));
-  }, [aggregates, sessions, activePreset, patchUsageWithPricing]);
+  }, [aggregates, sessions, activePreset]);
 
   const byModelRaw = useMemo<ByModelEntry[]>(() => {
     if (activePreset === 'all') return aggregates?.byModel || [];
+    const aggregateByModel = Array.isArray(aggregates?.byModel) ? aggregates.byModel : [];
+    if (aggregateByModel.length > 0) return aggregateByModel;
     const map = new Map<string, { provider?: string; model: string; count: number; totals: CostTotals }>();
 
     const addSlice = (params: { model?: string; provider?: string; count?: number; totals?: Partial<CostTotals> }) => {
@@ -606,8 +677,7 @@ export function useAnalyticsData(): AnalyticsData {
       };
       const count = Number(params.count);
       existing.count += Number.isFinite(count) && count > 0 ? count : 1;
-      const patchedUsage = patchUsageWithPricing(params.totals || {}, resolvedModel);
-      accumulateTotals(existing.totals, patchedUsage);
+      accumulateTotals(existing.totals, params.totals || {});
       if (!existing.provider && provider) existing.provider = provider;
       map.set(key, existing);
     };
@@ -640,7 +710,7 @@ export function useAnalyticsData(): AnalyticsData {
       count: entry.count,
       totals: entry.totals,
     }));
-  }, [aggregates, sessions, activePreset, patchUsageWithPricing]);
+  }, [aggregates, sessions, activePreset]);
 
   const pricingPatch = useMemo(() => {
     const delta = { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheWriteCost: 0, totalCost: 0 };
@@ -678,11 +748,36 @@ export function useAnalyticsData(): AnalyticsData {
 
   const byModel = pricingPatch.patchedByModel;
 
+  const totalsFromUsage = useMemo<CostTotals>(() => {
+    const usage = usageData?.totals || EMPTY_TOTALS;
+    return {
+      ...EMPTY_TOTALS,
+      ...usage,
+      input: toNum(usage.input),
+      output: toNum(usage.output),
+      cacheRead: toNum(usage.cacheRead),
+      cacheWrite: toNum(usage.cacheWrite),
+      totalTokens: toNum(usage.totalTokens),
+      totalCost: toNum(usage.totalCost),
+      inputCost: toNum(usage.inputCost),
+      outputCost: toNum(usage.outputCost),
+      cacheReadCost: toNum(usage.cacheReadCost),
+      cacheWriteCost: toNum(usage.cacheWriteCost),
+      missingCostEntries: toNum(usage.missingCostEntries),
+    } satisfies CostTotals;
+  }, [usageData]);
+
   const totals = useMemo<CostTotals>(() => {
-    // For filtered presets, keep overview totals sourced from complete daily aggregates.
-    // Session-derived byModel can be limited by fetch caps and may undercount high-traffic ranges.
+    // For filtered presets, prefer usage totals when daily usage.cost still has unknown-model gaps.
+    // Fall back to daily totals when usage totals are empty/limited.
     if (activePreset !== 'all') {
-      return totalsBase;
+      const baseMissing = toNum(totalsBase.missingCostEntries);
+      const usageHasSignal =
+        toNum(totalsFromUsage.totalTokens) > 0 || toNum(totalsFromUsage.totalCost) > 0;
+      const useUsageTotals =
+        usageHasSignal &&
+        (toNum(totalsFromUsage.totalCost) >= toNum(totalsBase.totalCost) || baseMissing > 0);
+      return useUsageTotals ? totalsFromUsage : totalsBase;
     }
 
     if (pricingPatch.patchedEntries <= 0) return totalsBase;
@@ -695,7 +790,7 @@ export function useAnalyticsData(): AnalyticsData {
       totalCost: Math.max(0, toNum(totalsBase.totalCost) + pricingPatch.delta.totalCost),
       missingCostEntries: Math.max(0, toNum(totalsBase.missingCostEntries) - pricingPatch.removedMissing),
     };
-  }, [activePreset, totalsBase, pricingPatch]);
+  }, [activePreset, totalsBase, totalsFromUsage, pricingPatch]);
 
   const periodInfo = useMemo(() => {
     if (startDate && endDate) {

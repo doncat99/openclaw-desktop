@@ -22,6 +22,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { gateway } from '@/services/gateway';
 import { notifications } from '@/services/notifications';
 import { changeLanguage } from '@/i18n';
+import { getStorageItem, storageKey } from '@/utils/storage';
 
 // ═══════════════════════════════════════════════════════════
 // AEGIS Desktop v4.0 — Mission Control
@@ -254,10 +255,21 @@ export default function App() {
         const httpUrl = wsUrl.replace(/^ws:/, 'http:').replace(/^wss:/, 'https:');
         setGatewayHttpUrl(httpUrl);
         localStorage.setItem('aegis-gateway-http', httpUrl);
-        if (!localStorage.getItem('aegis-language') && config.installerLanguage) {
-          const lang = config.installerLanguage as 'ar' | 'en';
+        if (!getStorageItem(storageKey('language')) && config.installerLanguage) {
+          const lang = String(config.installerLanguage || '');
           changeLanguage(lang);
-          useSettingsStore.getState().setLanguage(lang);
+          const normalized = lang.toLowerCase();
+          if (normalized === 'auto' || normalized.startsWith('ar') || normalized.startsWith('en') || normalized.startsWith('zh')) {
+            useSettingsStore.getState().setLanguage(
+              normalized === 'auto'
+                ? 'auto'
+                : normalized.startsWith('ar')
+                  ? 'ar'
+                  : normalized.startsWith('zh')
+                    ? 'zh'
+                    : 'en'
+            );
+          }
         }
         gateway.connect(wsUrl, token);
       } else {

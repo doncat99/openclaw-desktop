@@ -53,6 +53,11 @@ const getAgentName = (id: string) => {
   return names[id.toLowerCase()] ?? id;
 };
 
+function toNum(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
 // ── Tooltip for recharts ─────────────────────────────────────
 
 function CostTooltip({ active, payload, label }: any) {
@@ -140,7 +145,73 @@ export function DashboardPage() {
   const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
   const monthKey  = today.slice(0, 7); // "YYYY-MM"
 
-  const allDaily: any[] = useMemo(() => costData?.daily || [], [costData]);
+  const allDaily: any[] = useMemo(() => {
+    const costDaily: any[] = Array.isArray(costData?.daily) ? costData.daily : [];
+    const usageDaily: any[] = Array.isArray(usageData?.aggregates?.daily) ? usageData.aggregates.daily : [];
+
+    // Merge daily rows so Mission Control cards/charts stay aligned with usage aggregates
+    // when usage.cost daily entries still miss model pricing.
+    const map = new Map<string, any>();
+
+    for (const d of costDaily) {
+      const date = String(d?.date || '').slice(0, 10);
+      if (!date) continue;
+      map.set(date, {
+        date,
+        input: toNum(d?.input),
+        output: toNum(d?.output),
+        cacheRead: toNum(d?.cacheRead),
+        cacheWrite: toNum(d?.cacheWrite),
+        totalTokens: toNum(d?.totalTokens) || toNum(d?.input) + toNum(d?.output) + toNum(d?.cacheRead) + toNum(d?.cacheWrite),
+        inputCost: toNum(d?.inputCost),
+        outputCost: toNum(d?.outputCost),
+        cacheReadCost: toNum(d?.cacheReadCost),
+        cacheWriteCost: toNum(d?.cacheWriteCost),
+        totalCost: toNum(d?.totalCost),
+        missingCostEntries: toNum(d?.missingCostEntries),
+      });
+    }
+
+    for (const d of usageDaily) {
+      const date = String(d?.date || '').slice(0, 10);
+      if (!date) continue;
+      const usageCost = toNum(d?.cost ?? d?.totalCost);
+      const usageTokens = toNum(d?.tokens ?? d?.totalTokens);
+      const existing = map.get(date) || {
+        date,
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        inputCost: 0,
+        outputCost: 0,
+        cacheReadCost: 0,
+        cacheWriteCost: 0,
+        totalCost: 0,
+        missingCostEntries: 0,
+      };
+
+      const shouldUseUsageCost =
+        usageCost > existing.totalCost ||
+        existing.totalCost <= 0 ||
+        existing.missingCostEntries > 0;
+
+      if (shouldUseUsageCost && usageCost > 0) {
+        existing.totalCost = usageCost;
+        // usage daily aggregates don't provide input/output split; fall back to one-sided series for chart
+        if (toNum(existing.inputCost) + toNum(existing.outputCost) <= 0) {
+          existing.inputCost = usageCost;
+          existing.outputCost = 0;
+        }
+      }
+
+      if (usageTokens > 0) existing.totalTokens = Math.max(existing.totalTokens, usageTokens);
+      map.set(date, existing);
+    }
+
+    return Array.from(map.values());
+  }, [costData, usageData]);
 
   // Today's cost + change vs yesterday
   const todayCost = useMemo(
@@ -176,9 +247,9 @@ export function DashboardPage() {
 
   // Tokens today (from daily cost data)
   const todayEntry   = useMemo(() => allDaily.find((d: any) => d.date === today), [allDaily, today]);
-  const tokensIn     = todayEntry?.input  || 0;
+  const tokensIn     = todayEntry?.input || 0;
   const tokensOut    = todayEntry?.output || 0;
-  const tokensToday  = tokensIn + tokensOut;
+  const tokensToday  = (todayEntry?.totalTokens || 0) || (tokensIn + tokensOut);
 
   // Context usage from main session
   const mainSession  = sessions.find((s: any) => s.key === 'agent:main:main');
@@ -208,7 +279,7 @@ export function DashboardPage() {
       .slice(-14);
     return sorted.map((d: any) => ({
       date:   d.date.slice(5),       // MM-DD
-      input:  d.inputCost  || 0,
+      input:  (d.inputCost || d.outputCost) ? (d.inputCost || 0) : (d.totalCost || 0),
       output: d.outputCost || 0,
     }));
   }, [allDaily]);

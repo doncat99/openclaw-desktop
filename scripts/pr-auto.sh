@@ -182,11 +182,15 @@ else
 fi
 
 run_push() {
-  local -a push_flags=()
+  local force_flag=""
   if [[ "$HISTORY_REPAIRED" == "1" ]]; then
-    push_flags+=(--force-with-lease)
+    force_flag="--force-with-lease"
   fi
-  SKIP_CODEX_REVIEW=1 git push "${push_flags[@]}" -u "$REMOTE" "$CURRENT_BRANCH"
+  if [[ -n "$force_flag" ]]; then
+    SKIP_CODEX_REVIEW=1 git push "$force_flag" -u "$REMOTE" "$CURRENT_BRANCH"
+  else
+    SKIP_CODEX_REVIEW=1 git push -u "$REMOTE" "$CURRENT_BRANCH"
+  fi
 }
 
 push_with_retry() {
@@ -202,11 +206,15 @@ push_with_retry() {
 
   if printf '%s\n' "$push_output" | grep -Eq "RPC failed; HTTP 400|unexpected disconnect|remote end hung up unexpectedly"; then
     echo "[pr-auto] Push failed with HTTP transport error. Retrying once with HTTP/1.1 settings..."
-    local -a push_flags=()
+    local force_flag=""
     if [[ "$HISTORY_REPAIRED" == "1" ]]; then
-      push_flags+=(--force-with-lease)
+      force_flag="--force-with-lease"
     fi
-    SKIP_CODEX_REVIEW=1 git -c http.version=HTTP/1.1 -c http.postBuffer=524288000 push "${push_flags[@]}" -u "$REMOTE" "$CURRENT_BRANCH"
+    if [[ -n "$force_flag" ]]; then
+      SKIP_CODEX_REVIEW=1 git -c http.version=HTTP/1.1 -c http.postBuffer=524288000 push "$force_flag" -u "$REMOTE" "$CURRENT_BRANCH"
+    else
+      SKIP_CODEX_REVIEW=1 git -c http.version=HTTP/1.1 -c http.postBuffer=524288000 push -u "$REMOTE" "$CURRENT_BRANCH"
+    fi
     return $?
   fi
 

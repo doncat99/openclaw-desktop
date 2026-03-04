@@ -678,24 +678,11 @@ export function useAnalyticsData(): AnalyticsData {
 
   const byModel = pricingPatch.patchedByModel;
 
-  const totalsFromByModel = useMemo<CostTotals>(() => {
-    const sum: CostTotals = { ...EMPTY_TOTALS };
-    for (const entry of byModel) {
-      accumulateTotals(sum, entry.totals || EMPTY_TOTALS);
-    }
-    return sum;
-  }, [byModel]);
-
   const totals = useMemo<CostTotals>(() => {
-    // For filtered presets, byAgent/byModel are built from sessions and can include
-    // OpenRouter-patched prices even when daily buckets are still zero/unknown.
-    // Keep the overview totals aligned with those breakdowns.
+    // For filtered presets, keep overview totals sourced from complete daily aggregates.
+    // Session-derived byModel can be limited by fetch caps and may undercount high-traffic ranges.
     if (activePreset !== 'all') {
-      const hasModelTotals =
-        toNum(totalsFromByModel.totalTokens) > 0 ||
-        toNum(totalsFromByModel.totalCost) > 0 ||
-        toNum(totalsFromByModel.missingCostEntries) > 0;
-      return hasModelTotals ? totalsFromByModel : totalsBase;
+      return totalsBase;
     }
 
     if (pricingPatch.patchedEntries <= 0) return totalsBase;
@@ -708,7 +695,7 @@ export function useAnalyticsData(): AnalyticsData {
       totalCost: Math.max(0, toNum(totalsBase.totalCost) + pricingPatch.delta.totalCost),
       missingCostEntries: Math.max(0, toNum(totalsBase.missingCostEntries) - pricingPatch.removedMissing),
     };
-  }, [activePreset, totalsBase, totalsFromByModel, pricingPatch]);
+  }, [activePreset, totalsBase, pricingPatch]);
 
   const periodInfo = useMemo(() => {
     if (startDate && endDate) {

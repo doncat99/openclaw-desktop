@@ -87,6 +87,13 @@ interface ModelOption {
   provider: string;
 }
 
+interface SaveProfileResult {
+  ok: boolean;
+  configApplied: boolean;
+  message: string;
+  error?: string;
+}
+
 const CLAWHUB_API = 'https://clawhub.ai/api/v1';
 const hubSkillSearchCache = new Map<string, HubSkillCandidate[]>();
 const hubSkillDetailCache = new Map<string, HubSkillDetail>();
@@ -756,7 +763,7 @@ function RoleEditorCard({
   modelsError: string;
   onLearnFromConversation: (key: string, currentDraft: RoleDraft) => Promise<RoleDraft | null>;
   onAnalyzePropose: (key: string, currentDraft: RoleDraft) => Promise<void>;
-  onSave: (key: string, draft: RoleDraft) => Promise<void> | void;
+  onSave: (key: string, draft: RoleDraft) => Promise<SaveProfileResult> | SaveProfileResult;
   onReset: (key: string) => void;
 }) {
   const [draft, setDraft] = useState<RoleDraft>(buildDraft(profile));
@@ -1341,7 +1348,7 @@ function TeamContractsModal({
   onSelectKey: (key: string) => void;
   onLearnFromConversation: (key: string, currentDraft: RoleDraft) => Promise<RoleDraft | null>;
   onAnalyzePropose: (key: string, currentDraft: RoleDraft) => Promise<void>;
-  onSave: (key: string, draft: RoleDraft) => Promise<void> | void;
+  onSave: (key: string, draft: RoleDraft) => Promise<SaveProfileResult> | SaveProfileResult;
   onReset: (key: string) => void;
 }) {
   useEffect(() => {
@@ -2365,9 +2372,17 @@ export function TeamMonitorPage() {
 
   const handleApproveProposal = async (proposal: TeamEvolutionProposal) => {
     const roleDraft = fromProposalDraft(proposal.proposed);
-    await handleSaveProfile(proposal.key, roleDraft);
-    setProposalStatus(proposal.id, 'approved', 'Applied to profile and gateway config.');
-    setNotice({ type: 'ok', text: `Proposal approved and applied: ${proposal.agentTitle}` });
+    const result = await handleSaveProfile(proposal.key, roleDraft);
+    if (!result.ok) {
+      setProposalStatus(proposal.id, 'pending', `Apply failed: ${result.error || result.message}`);
+      setNotice({ type: 'error', text: `Approval failed for ${proposal.agentTitle}: ${result.error || result.message}` });
+      return;
+    }
+    const reviewNote = result.configApplied
+      ? 'Applied to profile and gateway config.'
+      : result.message;
+    setProposalStatus(proposal.id, 'approved', reviewNote);
+    setNotice({ type: 'ok', text: `Proposal approved: ${proposal.agentTitle}` });
   };
 
   const handleRejectProposal = (proposal: TeamEvolutionProposal) => {
@@ -2375,7 +2390,7 @@ export function TeamMonitorPage() {
     setNotice({ type: 'info', text: `Proposal rejected: ${proposal.agentTitle}` });
   };
 
-  const handleSaveProfile = async (key: string, draft: RoleDraft) => {
+  const handleSaveProfile = async (key: string, draft: RoleDraft): Promise<SaveProfileResult> => {
     const targetModel = normalizeOpenRouterModelRef(draft.model.trim());
     updateProfile(key, {
       role: draft.role.trim() || profiles[key]?.role || '',
@@ -2387,13 +2402,9 @@ export function TeamMonitorPage() {
 
     const resolvedAgentId = resolvedAgentByKey.get(key);
     if (!resolvedAgentId) {
-      setNotice({ type: 'info', text: 'Team role updated. Provision agent first to apply model selection.' });
-      return;
-    }
-
-    if (!targetModel) {
-      setNotice({ type: 'ok', text: 'Team role updated. Model selection is unchanged on gateway.' });
-      return;
+      const msg = 'Team role updated. Provision agent first to apply model selection.';
+      setNotice({ type: 'info', text: msg });
+      return { ok: true, configApplied: false, message: msg };
     }
 
     try {
@@ -2410,18 +2421,34 @@ export function TeamMonitorPage() {
 
       const entry = agentList.find((item: any) => item && typeof item === 'object' && item.id === resolvedAgentId);
       if (!entry) throw new Error(`agent not found in config.agents.list: ${resolvedAgentId}`);
-      entry.model = targetModel;
+      let message = '';
+      if (!targetModel) {
+        // Clear explicit override so agent inherits model selection from default/global config.
+        delete entry.model;
+        message = 'Team role updated. Reverted to inherited/default model.';
+      } else {
+        entry.model = targetModel;
+        message = `Team role updated. Explicit model applied: ${targetModel}`;
+      }
 
       const params: Record<string, any> = { raw: JSON.stringify(nextConfig, null, 2) };
       if (baseHash) params.baseHash = baseHash;
       await gateway.call('config.set', params);
       await refreshGroup('agents');
-      setNotice({ type: 'ok', text: `Team role updated. Explicit model applied: ${targetModel}` });
+      setNotice({ type: 'ok', text: message });
+      return { ok: true, configApplied: true, message };
     } catch (err: any) {
+      const errorText = err?.message || String(err);
       setNotice({
         type: 'error',
-        text: `Role updated, but model update failed for ${resolvedAgentId}: ${err?.message || String(err)}`,
+        text: `Role updated, but model update failed for ${resolvedAgentId}: ${errorText}`,
       });
+      return {
+        ok: false,
+        configApplied: false,
+        message: 'Role updated locally, but gateway config update failed.',
+        error: errorText,
+      };
     }
   };
 

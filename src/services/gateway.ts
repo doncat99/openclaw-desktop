@@ -604,8 +604,83 @@ class GatewayService {
     return this.request('agents.list', {});
   }
 
-  async createAgent(agent: { id: string; name?: string; model?: string; workspace?: string }): Promise<any> {
-    return this.request('agents.create', agent);
+  private cachedDefaultWorkspace?: string;
+
+  private async resolveDefaultWorkspace(): Promise<string | undefined> {
+    if (this.cachedDefaultWorkspace) return this.cachedDefaultWorkspace;
+    try {
+      // Fast path: ask for the specific config path first.
+      const direct = await this.request('config.get', { path: 'agents.defaults.workspace' });
+      const directValue = typeof direct === 'string'
+        ? direct
+        : typeof direct?.value === 'string'
+          ? direct.value
+          : typeof direct?.result === 'string'
+            ? direct.result
+            : '';
+      if (directValue.trim()) {
+        this.cachedDefaultWorkspace = directValue.trim();
+        return this.cachedDefaultWorkspace;
+      }
+    } catch {
+      // Fall through to full config lookup.
+    }
+
+    try {
+      const full = await this.request('config.get', {});
+      const nested = full?.config?.agents?.defaults?.workspace;
+      if (typeof nested === 'string' && nested.trim()) {
+        this.cachedDefaultWorkspace = nested.trim();
+        return this.cachedDefaultWorkspace;
+      }
+    } catch {
+      // No-op; caller will handle undefined.
+    }
+
+    return undefined;
+  }
+
+  async createAgent(agent: { id?: string; agentId?: string; name?: string; model?: string; workspace?: string }): Promise<any> {
+    // Gateway 2026.2.x expects agents.create params: { name, workspace }.
+    // Keep backward compatibility for existing callers that still pass { id } / { agentId }.
+    const requestedId = (agent.agentId || agent.id || '').trim();
+    const requestedName = (agent.name || '').trim();
+    const createName = requestedId || requestedName;
+    if (!createName) throw new Error('agents.create requires name (or id/agentId alias)');
+
+    const explicitWorkspace = typeof agent.workspace === 'string' ? agent.workspace.trim() : '';
+    const resolvedWorkspace = explicitWorkspace || (await this.resolveDefaultWorkspace()) || '';
+    if (!resolvedWorkspace) {
+      throw new Error('agents.create requires workspace. Set Agents default workspace in Config Manager first.');
+    }
+
+    const created = await this.request('agents.create', {
+      name: createName,
+      workspace: resolvedWorkspace,
+    });
+
+    const createdAgentId = String(created?.agentId || '').trim();
+    if (createdAgentId) {
+      // If caller provided a display name and deterministic id seed, rename after create.
+      if (requestedName && requestedId && requestedName !== requestedId) {
+        try {
+          await this.request('agents.update', { agentId: createdAgentId, name: requestedName });
+        } catch (err) {
+          console.warn('[GW] createAgent post-rename failed:', err);
+        }
+      }
+
+      // model is not accepted by agents.create schema; apply as follow-up.
+      if (agent.model) {
+        try {
+          await this.request('agents.update', { agentId: createdAgentId, model: agent.model });
+        } catch (err) {
+          console.warn('[GW] createAgent post-model-update failed:', err);
+        }
+      }
+    }
+
+    return created;
   }
 
   async updateAgent(agentId: string, patch: { name?: string; model?: string; workspace?: string }): Promise<any> {
@@ -663,6 +738,14 @@ class GatewayService {
 
   async getAvailableModels(): Promise<any> {
     return this.request('models.list', {});
+  }
+
+  async teamEvolveAnalyze(params: any): Promise<any> {
+    return this.request('team.evolve.analyze', params);
+  }
+
+  async teamEvolvePropose(params: any): Promise<any> {
+    return this.request('team.evolve.propose', params);
   }
 
   /** Public gateway RPC — use for one-off calls not covered by dedicated methods */

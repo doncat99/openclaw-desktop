@@ -144,6 +144,8 @@ interface GatewayDataState {
 
   // Polling active flag
   polling: boolean;
+  // Last gateway heartbeat/tick event timestamp
+  lastGatewayTick: number;
 
   // ── Actions ──
 
@@ -162,6 +164,7 @@ interface GatewayDataState {
 
   // Mark polling active/inactive
   setPolling: (active: boolean) => void;
+  setLastGatewayTick: (ts: number) => void;
 
   // ── Derived helpers (convenience) ──
   getMainSession: () => SessionInfo | undefined;
@@ -188,6 +191,7 @@ export const useGatewayDataStore = create<GatewayDataState>((set, get) => ({
   errors: { sessions: null, agents: null, cost: null, usage: null, cron: null },
 
   polling: false,
+  lastGatewayTick: 0,
 
   // ── Setters ──
 
@@ -242,6 +246,7 @@ export const useGatewayDataStore = create<GatewayDataState>((set, get) => ({
   setRunningSubAgents: (list) => set({ runningSubAgents: list }),
 
   setPolling: (active) => set({ polling: active }),
+  setLastGatewayTick: (ts) => set({ lastGatewayTick: ts }),
 
   // ── Derived ──
 
@@ -508,6 +513,14 @@ export function handleGatewayEvent(event: string, payload: any) {
   const store = useGatewayDataStore.getState();
 
   switch (event) {
+    // ── Gateway heartbeat/tick events ──
+    case 'tick':
+    case 'health': {
+      const ts = Number(payload?.ts) || Date.now();
+      store.setLastGatewayTick(ts);
+      break;
+    }
+
     // ── Session events ──
     case 'session.started':
     case 'session.running': {

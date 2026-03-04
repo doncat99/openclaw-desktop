@@ -12,9 +12,9 @@
 //   • "All Time" fetches 365 days + 2000 sessions.
 // ═══════════════════════════════════════════════════════════
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useChatStore }  from '@/stores/chatStore';
-import { fetchFullCost, fetchFullUsage } from '@/stores/gatewayDataStore';
+import { fetchFullCost, fetchFullUsage, useGatewayDataStore } from '@/stores/gatewayDataStore';
 
 import {
   type CostSummary,
@@ -42,6 +42,82 @@ const EMPTY_TOTALS: CostTotals = {
   inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheWriteCost: 0,
   missingCostEntries: 0,
 };
+
+interface OpenRouterPricing {
+  prompt: number;
+  completion: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+function toNum(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function normalizeModelKey(value?: string): string {
+  return String(value || '').trim().toLowerCase();
+}
+
+function stripOpenRouterPrefix(value: string): string {
+  return value.replace(/^openrouter\//, '');
+}
+
+function computeCostFromPricing(tokens: CostTotals, pricing: OpenRouterPricing): Pick<CostTotals, 'inputCost' | 'outputCost' | 'cacheReadCost' | 'cacheWriteCost' | 'totalCost'> {
+  const promptRate = pricing.prompt;
+  const completionRate = pricing.completion > 0 ? pricing.completion : pricing.prompt;
+  const cacheReadRate = pricing.cacheRead > 0 ? pricing.cacheRead : pricing.prompt;
+  const cacheWriteRate = pricing.cacheWrite > 0 ? pricing.cacheWrite : pricing.prompt;
+
+  const inputCost = tokens.input * promptRate;
+  const outputCost = tokens.output * completionRate;
+  const cacheReadCost = tokens.cacheRead * cacheReadRate;
+  const cacheWriteCost = tokens.cacheWrite * cacheWriteRate;
+  const totalCost = inputCost + outputCost + cacheReadCost + cacheWriteCost;
+
+  return { inputCost, outputCost, cacheReadCost, cacheWriteCost, totalCost };
+}
+
+function costSignature(data: CostSummary | null | undefined): string {
+  if (!data) return 'cost:null';
+  const totals = data.totals || EMPTY_TOTALS;
+  const daily = Array.isArray(data.daily) ? data.daily : [];
+  const headDate = daily[0]?.date || '';
+  const tailDate = daily[daily.length - 1]?.date || '';
+  return [
+    'cost',
+    data.updatedAt || 0,
+    data.days || 0,
+    daily.length,
+    headDate,
+    tailDate,
+    toNum(totals.totalTokens),
+    toNum(totals.totalCost),
+    toNum(totals.missingCostEntries),
+  ].join('|');
+}
+
+function usageSignature(data: SessionsUsageResponse | null | undefined): string {
+  if (!data) return 'usage:null';
+  const totals = data.totals || EMPTY_TOTALS;
+  const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+  const firstSessionTs = sessions[0]?.updatedAt || sessions[0]?.createdAt || '';
+  const byAgentCount = Array.isArray(data.aggregates?.byAgent) ? data.aggregates.byAgent.length : 0;
+  const byModelCount = Array.isArray(data.aggregates?.byModel) ? data.aggregates.byModel.length : 0;
+  return [
+    'usage',
+    data.updatedAt || 0,
+    data.startDate || '',
+    data.endDate || '',
+    sessions.length,
+    firstSessionTs,
+    byAgentCount,
+    byModelCount,
+    toNum(totals.totalTokens),
+    toNum(totals.totalCost),
+    toNum(totals.missingCostEntries),
+  ].join('|');
+}
 
 function accumulateTotals(target: CostTotals, source: Partial<CostTotals>): void {
   target.input             += source.input             || 0;
@@ -105,10 +181,17 @@ export interface AnalyticsData {
     actualCost: number;
   }[];
 
+  // OpenRouter pricing sync
+  pricingSyncing: boolean;
+  pricingLastSyncedAt: number | null;
+  pricingError: string | null;
+  pricingPatchedEntries: number;
+
   // Handlers
   handlePresetSelect: (id: PresetId, start: string, end: string) => void;
   handleApply:        (customStart?: string, customEnd?: string) => void;
   refresh:            () => void;
+  syncModelPricing:   () => Promise<void>;
 }
 
 
@@ -117,6 +200,7 @@ export interface AnalyticsData {
 // ═══════════════════════════════════════════════════════════
 export function useAnalyticsData(): AnalyticsData {
   const { connected } = useChatStore();
+  const gatewayTickTs = useGatewayDataStore((s) => s.lastGatewayTick);
 
   // ── Core data state ──
   const [costData,     setCostData]     = useState<CostSummary | null>(null);
@@ -124,6 +208,15 @@ export function useAnalyticsData(): AnalyticsData {
   const [loading,      setLoading]      = useState(true);
   const [isRefetching, setIsRefetching] = useState(false);
   const [error,        setError]        = useState<string | null>(null);
+  const [pricingMap, setPricingMap] = useState<Map<string, OpenRouterPricing>>(new Map());
+  const [pricingSyncing, setPricingSyncing] = useState(false);
+  const [pricingLastSyncedAt, setPricingLastSyncedAt] = useState<number | null>(null);
+  const [pricingError, setPricingError] = useState<string | null>(null);
+  const [hasHydrated, setHasHydrated] = useState(false);
+  const costSigRef = useRef<string>('cost:null');
+  const usageSigRef = useRef<string>('usage:null');
+  const fetchInFlightRef = useRef(false);
+  const lastAutoRefreshAtRef = useRef(0);
 
   // ── Saved preference — only changes via Apply ──
   const [savedPreset, setSavedPreset] = useState<PresetId>(
@@ -137,12 +230,66 @@ export function useAnalyticsData(): AnalyticsData {
   const [startDate, setStartDate] = useState<string>('');
   const [endDate,   setEndDate]   = useState<string>('');
 
+  const syncModelPricing = useCallback(async () => {
+    if (pricingSyncing) return;
+    setPricingSyncing(true);
+    setPricingError(null);
+    try {
+      const response = await fetch('https://openrouter.ai/api/v1/models');
+      if (!response.ok) throw new Error(`OpenRouter models HTTP ${response.status}`);
+      const payload = await response.json();
+      const rows = Array.isArray(payload?.data) ? payload.data : [];
+
+      const next = new Map<string, OpenRouterPricing>();
+      for (const row of rows) {
+        const id = normalizeModelKey(row?.id);
+        if (!id) continue;
+        const canonical = normalizeModelKey(row?.canonical_slug);
+        const pricing = row?.pricing || {};
+        const parsed: OpenRouterPricing = {
+          prompt: toNum(pricing.prompt),
+          completion: toNum(pricing.completion),
+          cacheRead: toNum(pricing.input_cache_read),
+          cacheWrite: toNum(pricing.input_cache_write),
+        };
+        if (parsed.prompt <= 0 && parsed.completion <= 0 && parsed.cacheRead <= 0 && parsed.cacheWrite <= 0) continue;
+
+        next.set(id, parsed);
+        next.set(`openrouter/${id}`, parsed);
+        const stripped = stripOpenRouterPrefix(id);
+        next.set(stripped, parsed);
+        next.set(`openrouter/${stripped}`, parsed);
+
+        if (canonical) {
+          next.set(canonical, parsed);
+          next.set(`openrouter/${canonical}`, parsed);
+          const canonicalStripped = stripOpenRouterPrefix(canonical);
+          next.set(canonicalStripped, parsed);
+          next.set(`openrouter/${canonicalStripped}`, parsed);
+        }
+      }
+
+      setPricingMap(next);
+      setPricingLastSyncedAt(Date.now());
+    } catch (err: any) {
+      setPricingError(err?.message || 'Failed to sync OpenRouter pricing');
+    } finally {
+      setPricingSyncing(false);
+    }
+  }, [pricingSyncing]);
+
   // ── Cache hydration — show stale data immediately on mount ──
   const hydrateFromCache = useCallback(() => {
     const cachedCost  = cacheGet<CostSummary>(CACHE_KEY_FULL_COST);
     const cachedUsage = cacheGet<SessionsUsageResponse>(CACHE_KEY_FULL_USAGE);
-    if (cachedCost?.data)  setCostData(cachedCost.data);
-    if (cachedUsage?.data) setUsageData(cachedUsage.data);
+    if (cachedCost?.data) {
+      setCostData(cachedCost.data);
+      costSigRef.current = costSignature(cachedCost.data);
+    }
+    if (cachedUsage?.data) {
+      setUsageData(cachedUsage.data);
+      usageSigRef.current = usageSignature(cachedUsage.data);
+    }
     if (cachedCost?.data || cachedUsage?.data) setLoading(false);
     return !!(cachedCost?.data || cachedUsage?.data);
   }, []);
@@ -151,6 +298,8 @@ export function useAnalyticsData(): AnalyticsData {
   const fetchData = useCallback(
     async (days = 30, limit = 200, showLoading = true) => {
       if (!connected) return;
+      if (fetchInFlightRef.current) return;
+      fetchInFlightRef.current = true;
       try {
         setError(null);
         if (showLoading) setLoading(true);
@@ -161,15 +310,25 @@ export function useAnalyticsData(): AnalyticsData {
         ]);
 
         if (costResult.status === 'fulfilled' && costResult.value) {
-          setCostData(costResult.value as unknown as CostSummary);
-          cacheSet(CACHE_KEY_FULL_COST, costResult.value);
+          const nextCost = costResult.value as unknown as CostSummary;
+          const nextSig = costSignature(nextCost);
+          if (nextSig !== costSigRef.current) {
+            setCostData(nextCost);
+            costSigRef.current = nextSig;
+            cacheSet(CACHE_KEY_FULL_COST, costResult.value);
+          }
         } else if (costResult.status === 'rejected') {
           console.error('[Analytics] Cost fetch failed:', costResult.reason);
         }
 
         if (usageResult.status === 'fulfilled' && usageResult.value) {
-          setUsageData(usageResult.value as unknown as SessionsUsageResponse);
-          cacheSet(CACHE_KEY_FULL_USAGE, usageResult.value);
+          const nextUsage = usageResult.value as unknown as SessionsUsageResponse;
+          const nextSig = usageSignature(nextUsage);
+          if (nextSig !== usageSigRef.current) {
+            setUsageData(nextUsage);
+            usageSigRef.current = nextSig;
+            cacheSet(CACHE_KEY_FULL_USAGE, usageResult.value);
+          }
         } else if (usageResult.status === 'rejected') {
           console.error('[Analytics] Usage fetch failed:', usageResult.reason);
         }
@@ -180,6 +339,7 @@ export function useAnalyticsData(): AnalyticsData {
       } catch (err: any) {
         setError(err?.message || 'Failed to load analytics data');
       } finally {
+        fetchInFlightRef.current = false;
         if (showLoading) setLoading(false);
       }
     },
@@ -212,7 +372,38 @@ export function useAnalyticsData(): AnalyticsData {
       const { days, limit } = getFetchParams(saved);
       fetchData(days, limit, !hasCached);
     }
+    setHasHydrated(true);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Heartbeat-driven auto refresh (event-driven):
+  // refresh analytics silently on gateway tick/health events.
+  useEffect(() => {
+    if (!connected) return;
+    if (!hasHydrated) return;
+    if (!gatewayTickTs) return;
+
+    const now = Date.now();
+    const autoRefreshMinMs =
+      activePreset === 'all' ? 120_000 :
+      activePreset === '90d' ? 60_000 :
+      activePreset === 'custom' ? 60_000 : 30_000;
+
+    if (now - lastAutoRefreshAtRef.current < autoRefreshMinMs) return;
+    lastAutoRefreshAtRef.current = now;
+
+    const { days, limit } = getFetchParams(activePreset);
+    void fetchData(days, limit, false);
+  }, [connected, hasHydrated, gatewayTickTs, activePreset, fetchData]);
+
+  // Auto-sync OpenRouter prices when we detect unknown-model entries.
+  useEffect(() => {
+    if (!connected) return;
+    if (pricingSyncing) return;
+    if (pricingMap.size > 0) return;
+    const missing = (costData?.totals?.missingCostEntries || 0) + (usageData?.totals?.missingCostEntries || 0);
+    if (missing <= 0) return;
+    void syncModelPricing();
+  }, [connected, costData, usageData, pricingMap.size, pricingSyncing, syncModelPricing]);
 
   // ── Preset click: change view, fetch if needed, NO save ──
   const handlePresetSelect = useCallback(
@@ -292,7 +483,75 @@ export function useAnalyticsData(): AnalyticsData {
     return allDaily.filter((d) => isInRange(d.date));
   }, [allDaily, isInRange, startDate, endDate]);
 
-  const totals = useMemo<CostTotals>(() => {
+  const findOpenRouterPricing = useCallback((model?: string): OpenRouterPricing | null => {
+    const raw = normalizeModelKey(model);
+    if (!raw || raw === 'unknown') return null;
+
+    const stripped = stripOpenRouterPrefix(raw);
+    const candidates = new Set<string>([
+      raw,
+      stripped,
+      `openrouter/${stripped}`,
+    ]);
+
+    const atIdx = stripped.indexOf('@');
+    if (atIdx > 0) {
+      const base = stripped.slice(0, atIdx);
+      candidates.add(base);
+      candidates.add(`openrouter/${base}`);
+    }
+
+    for (const key of candidates) {
+      const hit = pricingMap.get(key);
+      if (hit) return hit;
+    }
+
+    // Fallback: canonical slugs may include date suffixes.
+    for (const [key, value] of pricingMap.entries()) {
+      if (key.startsWith(`${stripped}-`) || key.startsWith(`openrouter/${stripped}-`)) {
+        return value;
+      }
+    }
+
+    return null;
+  }, [pricingMap]);
+
+  const patchUsageWithPricing = useCallback((usage: Partial<CostTotals>, model?: string): Partial<CostTotals> => {
+    const normalizedUsage = {
+      ...EMPTY_TOTALS,
+      ...usage,
+      input: toNum(usage.input),
+      output: toNum(usage.output),
+      cacheRead: toNum(usage.cacheRead),
+      cacheWrite: toNum(usage.cacheWrite),
+      totalTokens: toNum(usage.totalTokens),
+      totalCost: toNum(usage.totalCost),
+      inputCost: toNum(usage.inputCost),
+      outputCost: toNum(usage.outputCost),
+      cacheReadCost: toNum(usage.cacheReadCost),
+      cacheWriteCost: toNum(usage.cacheWriteCost),
+      missingCostEntries: toNum(usage.missingCostEntries),
+    } satisfies CostTotals;
+
+    const needsPatch =
+      normalizedUsage.missingCostEntries > 0 ||
+      (normalizedUsage.totalTokens > 0 && normalizedUsage.totalCost <= 0);
+    if (!needsPatch) return normalizedUsage;
+
+    const pricing = findOpenRouterPricing(model);
+    if (!pricing) return normalizedUsage;
+
+    const computed = computeCostFromPricing(normalizedUsage, pricing);
+    if (computed.totalCost <= 0) return normalizedUsage;
+
+    return {
+      ...normalizedUsage,
+      ...computed,
+      missingCostEntries: 0,
+    } satisfies CostTotals;
+  }, [findOpenRouterPricing]);
+
+  const totalsBase = useMemo<CostTotals>(() => {
     // "All Time": always use server totals — they reflect whatever scope was fetched,
     // and auto-update when the 365-day refetch completes.
     if (activePreset === 'all') {
@@ -323,28 +582,120 @@ export function useAnalyticsData(): AnalyticsData {
     for (const s of sessions) {
       const aid      = (s as any).agentId || 'unknown';
       const existing = map.get(aid) || { ...EMPTY_TOTALS };
-      accumulateTotals(existing, (s as any).usage || {});
+      const patchedUsage = patchUsageWithPricing((s as any).usage || {}, (s as any).model);
+      accumulateTotals(existing, patchedUsage);
       map.set(aid, existing);
     }
     return Array.from(map.entries()).map(([agentId, t]) => ({ agentId, totals: t }));
-  }, [aggregates, sessions, activePreset]);
+  }, [aggregates, sessions, activePreset, patchUsageWithPricing]);
 
-  const byModel = useMemo<ByModelEntry[]>(() => {
+  const byModelRaw = useMemo<ByModelEntry[]>(() => {
     if (activePreset === 'all') return aggregates?.byModel || [];
-    const map = new Map<string, { count: number; totals: CostTotals }>();
+    const map = new Map<string, { provider?: string; model: string; count: number; totals: CostTotals }>();
+
+    const addSlice = (params: { model?: string; provider?: string; count?: number; totals?: Partial<CostTotals> }) => {
+      const rawModel = String(params.model || '').trim();
+      const provider = String(params.provider || '').trim();
+      const resolvedModel = rawModel || (provider ? `${provider}/unknown` : 'unknown');
+      const key = `${provider || ''}::${resolvedModel}`;
+      const existing = map.get(key) || {
+        provider: provider || undefined,
+        model: resolvedModel,
+        count: 0,
+        totals: { ...EMPTY_TOTALS },
+      };
+      const count = Number(params.count);
+      existing.count += Number.isFinite(count) && count > 0 ? count : 1;
+      const patchedUsage = patchUsageWithPricing(params.totals || {}, resolvedModel);
+      accumulateTotals(existing.totals, patchedUsage);
+      if (!existing.provider && provider) existing.provider = provider;
+      map.set(key, existing);
+    };
+
     for (const s of sessions) {
-      const model    = (s as any).model || 'unknown';
-      const existing = map.get(model) || { count: 0, totals: { ...EMPTY_TOTALS } };
-      existing.count++;
-      accumulateTotals(existing.totals, (s as any).usage || {});
-      map.set(model, existing);
+      const modelUsage = Array.isArray((s as any)?.usage?.modelUsage) ? (s as any).usage.modelUsage : [];
+      if (modelUsage.length > 0) {
+        for (const mu of modelUsage) {
+          addSlice({
+            model: mu?.model || (s as any)?.model,
+            provider: mu?.provider || (s as any)?.modelProvider,
+            count: mu?.count,
+            totals: mu?.totals || {},
+          });
+        }
+        continue;
+      }
+
+      addSlice({
+        model: (s as any)?.model,
+        provider: (s as any)?.modelProvider,
+        count: 1,
+        totals: (s as any)?.usage || {},
+      });
     }
-    return Array.from(map.entries()).map(([model, data]) => ({
-      model,
-      count:  data.count,
-      totals: data.totals,
+
+    return Array.from(map.values()).map((entry) => ({
+      provider: entry.provider,
+      model: entry.model,
+      count: entry.count,
+      totals: entry.totals,
     }));
-  }, [aggregates, sessions, activePreset]);
+  }, [aggregates, sessions, activePreset, patchUsageWithPricing]);
+
+  const pricingPatch = useMemo(() => {
+    const delta = { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheWriteCost: 0, totalCost: 0 };
+    let patchedEntries = 0;
+    let removedMissing = 0;
+
+    const patchedByModel = byModelRaw.map((entry) => {
+      const original = entry.totals || EMPTY_TOTALS;
+      const patched = patchUsageWithPricing(original, entry.model);
+      const changed =
+        toNum(patched.totalCost) !== toNum(original.totalCost) ||
+        toNum(patched.inputCost) !== toNum(original.inputCost) ||
+        toNum(patched.outputCost) !== toNum(original.outputCost) ||
+        toNum(patched.cacheReadCost) !== toNum(original.cacheReadCost) ||
+        toNum(patched.cacheWriteCost) !== toNum(original.cacheWriteCost) ||
+        toNum(patched.missingCostEntries) !== toNum(original.missingCostEntries);
+
+      if (!changed) return entry;
+
+      patchedEntries += 1;
+      removedMissing += Math.max(0, toNum(original.missingCostEntries) - toNum(patched.missingCostEntries));
+      delta.inputCost += toNum(patched.inputCost) - toNum(original.inputCost);
+      delta.outputCost += toNum(patched.outputCost) - toNum(original.outputCost);
+      delta.cacheReadCost += toNum(patched.cacheReadCost) - toNum(original.cacheReadCost);
+      delta.cacheWriteCost += toNum(patched.cacheWriteCost) - toNum(original.cacheWriteCost);
+      delta.totalCost += toNum(patched.totalCost) - toNum(original.totalCost);
+
+      const modelKey = stripOpenRouterPrefix(normalizeModelKey(entry.model));
+      const provider = entry.provider || (modelKey.includes('/') ? modelKey.split('/')[0] : undefined);
+      return { ...entry, provider, totals: patched as CostTotals };
+    });
+
+    return { patchedByModel, patchedEntries, removedMissing, delta };
+  }, [byModelRaw, patchUsageWithPricing]);
+
+  const byModel = pricingPatch.patchedByModel;
+
+  const totals = useMemo<CostTotals>(() => {
+    // For filtered presets, keep overview totals sourced from complete daily aggregates.
+    // Session-derived byModel can be limited by fetch caps and may undercount high-traffic ranges.
+    if (activePreset !== 'all') {
+      return totalsBase;
+    }
+
+    if (pricingPatch.patchedEntries <= 0) return totalsBase;
+    return {
+      ...totalsBase,
+      inputCost: Math.max(0, toNum(totalsBase.inputCost) + pricingPatch.delta.inputCost),
+      outputCost: Math.max(0, toNum(totalsBase.outputCost) + pricingPatch.delta.outputCost),
+      cacheReadCost: Math.max(0, toNum(totalsBase.cacheReadCost) + pricingPatch.delta.cacheReadCost),
+      cacheWriteCost: Math.max(0, toNum(totalsBase.cacheWriteCost) + pricingPatch.delta.cacheWriteCost),
+      totalCost: Math.max(0, toNum(totalsBase.totalCost) + pricingPatch.delta.totalCost),
+      missingCostEntries: Math.max(0, toNum(totalsBase.missingCostEntries) - pricingPatch.removedMissing),
+    };
+  }, [activePreset, totalsBase, pricingPatch]);
 
   const periodInfo = useMemo(() => {
     if (startDate && endDate) {
@@ -410,6 +761,10 @@ export function useAnalyticsData(): AnalyticsData {
     loading,
     isRefetching,
     error,
+    pricingSyncing,
+    pricingLastSyncedAt,
+    pricingError,
+    pricingPatchedEntries: pricingPatch.patchedEntries,
     activePreset,
     savedPreset,
     startDate,
@@ -425,9 +780,10 @@ export function useAnalyticsData(): AnalyticsData {
     donutData,
     handlePresetSelect,
     handleApply,
+    syncModelPricing,
     refresh: async () => {
       const { days, limit } = getFetchParams(activePreset);
-      await fetchData(days, limit, true);
+      await fetchData(days, limit, false);
     },
   };
 }

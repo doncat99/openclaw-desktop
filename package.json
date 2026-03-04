@@ -10,11 +10,16 @@
     "url": "https://github.com/AegisStar/aegis-desktop.git"
   },
   "scripts": {
-    "dev": "concurrently --kill-others-on-fail \"vite\" \"wait-on http://localhost:5173 && node scripts/build-electron.js && electron . --enable-logging\"",
+    "dev": "concurrently --kill-others-on-fail \"vite --strictPort\" \"wait-on http://localhost:5173 && node scripts/build-electron.js && electron . --enable-logging\"",
     "dev:web": "vite",
     "build:electron": "node scripts/build-electron.js",
     "build:renderer": "vite build",
     "build": "node scripts/build-electron.js && vite build",
+    "review:codex": "bash scripts/codex-review.sh",
+    "review:codex:uncommitted": "bash scripts/codex-review.sh --uncommitted",
+    "review:install-hook": "bash scripts/install-review-hook.sh",
+    "pr:auto": "bash scripts/pr-auto.sh",
+    "pr:auto:skip-review": "SKIP_CODEX_REVIEW=1 bash scripts/pr-auto.sh",
     "package": "npm run build && electron-builder --win",
     "package:portable": "npm run build && electron-builder --win portable"
   },
@@ -110,8 +115,7 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "assets/**/*",
-      "!assets/*.png"
+      "assets/**/*"
     ],
     "extraResources": [
       {

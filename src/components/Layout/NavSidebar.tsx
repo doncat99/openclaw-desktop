@@ -12,6 +12,8 @@ import {
   ListChecks,
   Network,
   Terminal,
+  Globe,
+  Database,
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getDirection } from '@/i18n';
@@ -34,6 +36,8 @@ const navItems: NavItem[] = [
   { to: '/team-monitor', icon: Network, labelKey: 'nav.teamMonitor' },
   { to: '/costs', icon: DollarSign, labelKey: 'nav.costs' },
   { to: '/skills', icon: Puzzle, labelKey: 'nav.skills' },
+  { to: '/aella', icon: Globe, labelKey: 'nav.aella' },
+  { to: '/knowledge', icon: Database, labelKey: 'nav.knowledge' },
   { to: '/terminal', icon: Terminal, labelKey: 'nav.terminal' },
   { to: '/memory', icon: Brain, labelKey: 'nav.memory', badge: '🧪' },
   { to: '/config', icon: Settings2, labelKey: 'nav.config' },

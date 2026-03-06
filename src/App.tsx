@@ -15,6 +15,8 @@ import { SettingsPageFull } from '@/pages/SettingsPage';
 import { ConfigManagerPage } from '@/pages/ConfigManager';
 import { TaskRpgPage } from '@/pages/TaskRpg';
 import { TeamMonitorPage } from '@/pages/TeamMonitor';
+import { AellaExplorerPage } from '@/pages/AellaExplorer';
+import { KnowledgeAtlasPage } from '@/pages/KnowledgeAtlas';
 import { PairingScreen } from '@/components/PairingScreen';
 import { ToastContainer } from '@/components/Toast/ToastContainer';
 import { useChatStore } from '@/stores/chatStore';
@@ -333,6 +335,8 @@ export default function App() {
             <Route path="/agents" element={<AgentHubPage />} />
             <Route path="/team-monitor" element={<TeamMonitorPage />} />
             <Route path="/skills" element={<SkillsPageFull />} />
+            <Route path="/aella" element={<AellaExplorerPage />} />
+            <Route path="/knowledge" element={<KnowledgeAtlasPage />} />
             <Route path="/terminal" element={<TerminalPage />} />
             <Route path="/memory" element={<MemoryExplorerPage />} />
             <Route path="/config" element={<ConfigManagerPage />} />

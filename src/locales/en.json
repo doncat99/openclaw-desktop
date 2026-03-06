@@ -28,6 +28,8 @@
     "config": "Config Manager",
     "settings": "Settings",
     "terminal": "Terminal",
+    "aella": "Aella",
+    "knowledge": "Knowledge",
     "notifications": "Notifications"
   },
   "skills": {

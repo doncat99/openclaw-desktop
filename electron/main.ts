@@ -396,7 +396,7 @@ function createWindow(): void {
     }
   );
 
-  // Allow loading external images (Wikipedia, Cloudinary, etc.)
+  // Allow loading external media and iframe apps (Aella / local Atlas).
   mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
@@ -407,6 +407,8 @@ function createWindow(): void {
           "style-src-elem 'self' 'unsafe-inline' https:; " +
           "img-src 'self' data: blob: https: http:; " +
           "media-src 'self' data: blob: https: http:; " +
+          "frame-src 'self' data: blob: https: http:; " +
+          "child-src 'self' data: blob: https: http:; " +
           "connect-src 'self' ws: wss: http: https:; " +
           "font-src 'self' data: https:;"
         ],

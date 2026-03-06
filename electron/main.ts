@@ -48,8 +48,10 @@ function ensureStableUserDataDir(): void {
     const identityFile = 'device-identity.json';
     const targetConfigPath = path.join(targetUserData, CONFIG_FILE_NAME);
     const targetLegacyConfigPath = path.join(targetUserData, LEGACY_CONFIG_FILE_NAME);
-    const hasExisting = fs.existsSync(targetConfigPath) || fs.existsSync(path.join(targetUserData, identityFile));
-    if (hasExisting) return;
+    const targetIdentityPath = path.join(targetUserData, identityFile);
+    const hasConfig = fs.existsSync(targetConfigPath) || fs.existsSync(targetLegacyConfigPath);
+    const hasIdentity = fs.existsSync(targetIdentityPath);
+    if (hasConfig && hasIdentity) return;
 
     const legacyDirs = [
       'AEGIS Desktop',
@@ -66,9 +68,8 @@ function ensureStableUserDataDir(): void {
 
       // Migrate device identity
       const srcIdentity = path.join(legacyPath, identityFile);
-      const dstIdentity = path.join(targetUserData, identityFile);
-      if (fs.existsSync(srcIdentity) && !fs.existsSync(dstIdentity)) {
-        fs.copyFileSync(srcIdentity, dstIdentity);
+      if (fs.existsSync(srcIdentity) && !fs.existsSync(targetIdentityPath)) {
+        fs.copyFileSync(srcIdentity, targetIdentityPath);
         copied += 1;
       }
 
@@ -88,8 +89,8 @@ function ensureStableUserDataDir(): void {
       }
       if (copied > 0) {
         console.log(`[Config] Migrated ${copied} file(s) from legacy userData: ${legacyPath}`);
-        break;
       }
+      if (fs.existsSync(targetConfigPath) && fs.existsSync(targetIdentityPath)) break;
     }
 
     // Local rename fallback inside the target directory

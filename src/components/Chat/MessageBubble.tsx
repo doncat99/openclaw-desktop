@@ -21,7 +21,7 @@ interface ParsedArtifact {
 }
 
 function parseArtifacts(text: string): { parts: Array<{ kind: 'text' | 'artifact'; text?: string; artifact?: ParsedArtifact }>} {
-  const regex = /<aegis_artifact\s+type="([^"]+)"\s+title="([^"]*)">([\s\S]*?)<\/aegis_artifact>/g;
+  const regex = /<(?:aegis_artifact|ontosynth_artifact)\s+type="([^"]+)"\s+title="([^"]*)">([\s\S]*?)<\/(?:aegis_artifact|ontosynth_artifact)>/g;
   const parts: Array<{ kind: 'text' | 'artifact'; text?: string; artifact?: ParsedArtifact }> = [];
   let lastIndex = 0;
   let match;
@@ -308,7 +308,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onResend }: 
             <div className="markdown-body text-[14px] leading-relaxed text-aegis-text">
               {(() => {
                 // Check for artifacts in assistant messages
-                const hasArtifacts = cleanContent.includes('<aegis_artifact');
+                const hasArtifacts = cleanContent.includes('<aegis_artifact') || cleanContent.includes('<ontosynth_artifact');
                 if (hasArtifacts) {
                   const { parts } = parseArtifacts(cleanContent);
                   return parts.map((part, idx) => {

@@ -159,9 +159,9 @@ CAPABILITIES:
 ARTIFACTS (opens in a separate preview window):
 For interactive content (dashboards, games, charts, UIs, diagrams), wrap in:
 
-<ontosynth_artifact type="TYPE" title="Title">
+<aegis_artifact type="TYPE" title="Title">
 ...content...
-</ontosynth_artifact>
+</aegis_artifact>
 
 Types: html (vanilla JS, CSS inline) | react (JSX, React 18 pre-loaded) | svg | mermaid
 Rules:
@@ -1066,7 +1066,7 @@ class GatewayService {
           console.log('[GW] 🔊 Media URL (HTTP):', mediaUrl);
         } else {
           // File path — resolve via Electron IPC
-          mediaUrl = `ontosynth-media:${mediaPath}`;
+          mediaUrl = `aegis-media:${mediaPath}`;
           console.log('[GW] 🔊 Media path:', mediaPath);
         }
       }

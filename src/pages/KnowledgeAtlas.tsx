@@ -90,6 +90,7 @@ export function KnowledgeAtlasPage() {
   const [atlasUrl, setAtlasUrl] = useState('');
   const [lastBuild, setLastBuild] = useState<KnowledgeAtlasBuildResponse | null>(null);
   const [lastBuiltSourcePath, setLastBuiltSourcePath] = useState('');
+  const [autoBuildAttemptedSourcePath, setAutoBuildAttemptedSourcePath] = useState('');
 
   const [statusText, setStatusText] = useState('Idle');
   const [healthError, setHealthError] = useState('');
@@ -202,8 +203,11 @@ export function KnowledgeAtlasPage() {
     if (!selectedSourcePath) return;
     if (building) return;
     if (selectedSourcePath === lastBuiltSourcePath && atlasUrl) return;
+    if (selectedSourcePath === autoBuildAttemptedSourcePath) return;
+    // Attempt automatic build once per source selection to avoid retry loops on persistent failures.
+    setAutoBuildAttemptedSourcePath(selectedSourcePath);
     void buildAtlas(false);
-  }, [atlasUrl, buildAtlas, building, lastBuiltSourcePath, selectedSourcePath]);
+  }, [atlasUrl, autoBuildAttemptedSourcePath, buildAtlas, building, lastBuiltSourcePath, selectedSourcePath]);
 
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden p-6 gap-4 bg-aegis-bg">

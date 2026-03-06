@@ -27,6 +27,10 @@ export function OverviewCards({
   periodInfo,
 }: OverviewCardsProps) {
   const { t } = useTranslation();
+  const isSingleDay = Number(periodInfo.days || 0) <= 1;
+  const costLabel = isSingleDay
+    ? t('analytics.todayCost', "Today's Cost")
+    : t('analytics.selectedPeriodCost', 'Selected Period Cost');
 
   return (
     <div className="grid grid-cols-5 gap-3">
@@ -34,7 +38,7 @@ export function OverviewCards({
       <BigStatCard
         iconEmoji="💰"
         value={totals.totalCost}
-        label={t('analytics.totalCost', 'Total Cost')}
+        label={costLabel}
         color={themeHex('accent')}
         prefix="$"
         decimals={2}

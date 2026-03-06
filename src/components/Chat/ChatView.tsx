@@ -68,6 +68,7 @@ export function ChatView() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
+  const historyReqSeqRef = useRef(0);
   // prevCompactionsRef removed — compaction detection moved to gateway.ts (direct agent event)
 
   // ── Clarify Card state (auto-detection disabled — triggered too many false positives) ──
@@ -134,33 +135,46 @@ export function ChatView() {
     clean = clean.replace(/\[[A-Z]+_DESKTOP_CONTEXT\][\s\S]*?\[\/[A-Z]+_DESKTOP_CONTEXT\]\s*/i, '');
     // Remove Conversation info JSON block
     clean = clean.replace(/Conversation info \(untrusted metadata\):\s*```json\s*\{[\s\S]*?\}\s*```\s*/i, '');
-    // Remove System notification blocks (exec completed, compaction audit, etc.)
-    // Greedy match until the next recognized user block (timestamp, Conversation info, Desktop context) or end
-    clean = clean.replace(/System:\s*\[[\s\S]*?(?=\n\nConversation info|\n\n\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)|\n\n\[[A-Z]+_DESKTOP|\s*$)/g, '');
+    // Remove only known synthetic desktop system-notification blocks.
+    // Keep genuine user/system messages like cron reminders ("System: [2026-...] ...").
+    clean = clean.replace(
+      /System:\s*\[(?:Exec(?:ution)?\s+Completed|Compaction(?:\s+Audit)?|Desktop|Notification)[^\]]*\][\s\S]*?(?=\n\nConversation info|\n\n\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)|\n\n\[[A-Z]+_DESKTOP|\s*$)/gi,
+      '',
+    );
     // Remove inline [Sat 2026-...] timestamp prefixes
     clean = clean.replace(/^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+UTC\]\s*/i, '');
     return clean.trim();
   };
 
-  const loadHistory = useCallback(async () => {
-    // Check cache first
-    const cached = getCachedMessages(activeSessionKey);
-    if (cached && cached.length > 0) {
+  const loadHistory = useCallback(async (options?: { force?: boolean; showSpinner?: boolean }) => {
+    const force = options?.force === true;
+    const showSpinner = options?.showSpinner !== false;
+    const reqSeq = ++historyReqSeqRef.current;
+    const sessionKey = activeSessionKey;
+    const cached = getCachedMessages(sessionKey);
+
+    // Always paint cache first for responsive session switches, then refresh from Gateway.
+    if (!force && cached && cached.length > 0 && useChatStore.getState().activeSessionKey === sessionKey) {
       setMessages(cached);
-      return;
     }
 
-    setIsLoadingHistory(true);
+    if (showSpinner && (force || !cached || cached.length === 0)) {
+      setIsLoadingHistory(true);
+    }
     try {
-      const result = await gateway.getHistory(activeSessionKey, 200);
+      const result = await gateway.getHistory(sessionKey, 200);
+      if (reqSeq !== historyReqSeqRef.current) return;
       const rawMessages = Array.isArray(result?.messages) ? result.messages : [];
       const filtered = rawMessages
         .map((msg: any) => {
           const role = typeof msg.role === 'string' ? msg.role : 'unknown';
           const content = extractText(msg.content);
-          if (!content) return null;
+          const stopReason = String(msg.stopReason || '').toLowerCase();
+          const errorMessage = typeof msg.errorMessage === 'string' ? msg.errorMessage.trim() : '';
+          const normalizedContent = content || (stopReason === 'error' && errorMessage ? `⚠️ ${errorMessage}` : '');
+          if (!normalizedContent) return null;
           if (role === 'system') {
-            if (/compact/i.test(content)) {
+            if (/compact/i.test(normalizedContent)) {
               return { id: msg.id || `compaction-${Math.random().toString(36).slice(2)}`, role: 'compaction' as any, content: '', timestamp: msg.timestamp || msg.createdAt || new Date().toISOString() };
             }
             return null;
@@ -219,10 +233,10 @@ export function ChatView() {
             if (hasOnlyTools) return null;
           }
           if (msg.toolCallId || msg.tool_call_id) return null;
-          if (role === 'assistant' && isNoise(content)) return null;
+          if (role === 'assistant' && isNoise(normalizedContent)) return null;
 
           // Clean user messages — strip injected Desktop context & metadata
-          const displayContent = role === 'user' ? stripUserMeta(content) : content;
+          const displayContent = role === 'user' ? stripUserMeta(normalizedContent) : normalizedContent;
           if (!displayContent) return null;
 
           return {
@@ -235,12 +249,15 @@ export function ChatView() {
         })
         .flat()
         .filter(Boolean) as any[];
-      setMessages(filtered);
-      cacheMessagesForSession(activeSessionKey, filtered);
+      if (reqSeq !== historyReqSeqRef.current) return;
+      cacheMessagesForSession(sessionKey, filtered);
+      if (useChatStore.getState().activeSessionKey === sessionKey) {
+        setMessages(filtered);
+      }
     } catch (err) {
       console.error('[ChatView] History load failed:', err);
     } finally {
-      setIsLoadingHistory(false);
+      if (reqSeq === historyReqSeqRef.current) setIsLoadingHistory(false);
     }
   }, [setMessages, setIsLoadingHistory, activeSessionKey, getCachedMessages, cacheMessagesForSession]);
 
@@ -248,18 +265,15 @@ export function ChatView() {
   const handleRefresh = useCallback(async () => {
     if (isRefreshing || isLoadingHistory) return;
     setIsRefreshing(true);
-    try { await loadHistory(); }
+    try { await loadHistory({ force: true, showSpinner: false }); }
     finally { setTimeout(() => setIsRefreshing(false), 500); }
   }, [isRefreshing, isLoadingHistory, loadHistory]);
 
-  // Auto-load history on connect
-  const hasLoadedRef = useRef(false);
+  // Auto-load / auto-refresh history on connect and on session switch.
   useEffect(() => {
-    if (connected && !hasLoadedRef.current && messages.length === 0) {
-      hasLoadedRef.current = true;
-      loadHistory();
-    }
-  }, [connected, messages.length, loadHistory]);
+    if (!connected) return;
+    void loadHistory();
+  }, [connected, activeSessionKey, loadHistory]);
 
   // Register loadHistory in store so MessageInput can trigger it before first send
   useEffect(() => {

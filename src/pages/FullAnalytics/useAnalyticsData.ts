@@ -193,6 +193,16 @@ function resolveUsageRange(
   return { startDate: start, endDate: end };
 }
 
+function normalizeDay(value: unknown): string {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  const isoDayMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoDayMatch?.[1]) return isoDayMatch[1];
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  return '';
+}
+
 // ═══════════════════════════════════════════════════════════
 // Public interface
 // ═══════════════════════════════════════════════════════════
@@ -628,6 +638,16 @@ export function useAnalyticsData(): AnalyticsData {
 
   const allSessions = usageData?.sessions || [];
   const aggregates  = usageData?.aggregates;
+  const usageRangeMatchesSelection = useMemo(() => {
+    if (activePreset === 'all') return true;
+    const selectedStart = normalizeDay(startDate);
+    const selectedEnd = normalizeDay(endDate);
+    const usageStart = normalizeDay(usageData?.startDate);
+    const usageEnd = normalizeDay(usageData?.endDate);
+    if (!selectedStart || !selectedEnd) return false;
+    if (!usageStart || !usageEnd) return false;
+    return usageStart === selectedStart && usageEnd === selectedEnd;
+  }, [activePreset, startDate, endDate, usageData?.startDate, usageData?.endDate]);
 
   const sessions = useMemo(() => {
     if (!startDate && !endDate) return allSessions;
@@ -647,7 +667,7 @@ export function useAnalyticsData(): AnalyticsData {
   const byAgent = useMemo<ByAgentEntry[]>(() => {
     if (activePreset === 'all') return aggregates?.byAgent || [];
     const aggregateByAgent = Array.isArray(aggregates?.byAgent) ? aggregates.byAgent : [];
-    if (aggregateByAgent.length > 0) return aggregateByAgent;
+    if (usageRangeMatchesSelection && aggregateByAgent.length > 0) return aggregateByAgent;
     const map = new Map<string, CostTotals>();
     for (const s of sessions) {
       const aid      = (s as any).agentId || 'unknown';
@@ -656,12 +676,12 @@ export function useAnalyticsData(): AnalyticsData {
       map.set(aid, existing);
     }
     return Array.from(map.entries()).map(([agentId, t]) => ({ agentId, totals: t }));
-  }, [aggregates, sessions, activePreset]);
+  }, [aggregates, sessions, activePreset, usageRangeMatchesSelection]);
 
   const byModelRaw = useMemo<ByModelEntry[]>(() => {
     if (activePreset === 'all') return aggregates?.byModel || [];
     const aggregateByModel = Array.isArray(aggregates?.byModel) ? aggregates.byModel : [];
-    if (aggregateByModel.length > 0) return aggregateByModel;
+    if (usageRangeMatchesSelection && aggregateByModel.length > 0) return aggregateByModel;
     const map = new Map<string, { provider?: string; model: string; count: number; totals: CostTotals }>();
 
     const addSlice = (params: { model?: string; provider?: string; count?: number; totals?: Partial<CostTotals> }) => {
@@ -710,7 +730,7 @@ export function useAnalyticsData(): AnalyticsData {
       count: entry.count,
       totals: entry.totals,
     }));
-  }, [aggregates, sessions, activePreset]);
+  }, [aggregates, sessions, activePreset, usageRangeMatchesSelection]);
 
   const pricingPatch = useMemo(() => {
     const delta = { inputCost: 0, outputCost: 0, cacheReadCost: 0, cacheWriteCost: 0, totalCost: 0 };
@@ -775,6 +795,7 @@ export function useAnalyticsData(): AnalyticsData {
       const usageHasSignal =
         toNum(totalsFromUsage.totalTokens) > 0 || toNum(totalsFromUsage.totalCost) > 0;
       const useUsageTotals =
+        usageRangeMatchesSelection &&
         usageHasSignal &&
         (toNum(totalsFromUsage.totalCost) >= toNum(totalsBase.totalCost) || baseMissing > 0);
       return useUsageTotals ? totalsFromUsage : totalsBase;
@@ -790,7 +811,7 @@ export function useAnalyticsData(): AnalyticsData {
       totalCost: Math.max(0, toNum(totalsBase.totalCost) + pricingPatch.delta.totalCost),
       missingCostEntries: Math.max(0, toNum(totalsBase.missingCostEntries) - pricingPatch.removedMissing),
     };
-  }, [activePreset, totalsBase, totalsFromUsage, pricingPatch]);
+  }, [activePreset, totalsBase, totalsFromUsage, pricingPatch, usageRangeMatchesSelection]);
 
   const periodInfo = useMemo(() => {
     if (startDate && endDate) {

@@ -1777,6 +1777,7 @@ export function TeamMonitorPage() {
   const runningSubAgents = useGatewayDataStore((s) => s.runningSubAgents);
 
   const {
+    hasHydrated,
     leadAgentId,
     profiles,
     proposals,
@@ -1849,8 +1850,9 @@ export function TeamMonitorPage() {
   const resolvedMembers = useMemo(() => resolveTeamMembers(agents), [agents]);
 
   useEffect(() => {
+    if (!hasHydrated) return;
     syncFromDefinitions(teamDefs);
-  }, [syncFromDefinitions, teamDefs]);
+  }, [hasHydrated, syncFromDefinitions, teamDefs]);
 
   const resolvedAgentByKey = useMemo(() => {
     const map = new Map<string, string>();

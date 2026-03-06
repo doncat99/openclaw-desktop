@@ -62,6 +62,8 @@ export interface TeamDialogResumeState {
 }
 
 interface TeamStudioState {
+  hasHydrated: boolean;
+  setHasHydrated: (value: boolean) => void;
   leadAgentId: string;
   profiles: Record<string, TeamAgentProfile>;
   proposals: TeamEvolutionProposal[];
@@ -127,6 +129,8 @@ migrateStorageKey(TEAM_STUDIO_KEY, 'aegis-team-studio');
 export const useTeamStudioStore = create<TeamStudioState>()(
   persist(
     (set, get) => ({
+      hasHydrated: false,
+      setHasHydrated: (value) => set({ hasHydrated: value }),
       leadAgentId: defaultLeadAgentId(),
       profiles: defaultProfiles(getTeamDefinitions()),
       proposals: [],
@@ -285,6 +289,9 @@ export const useTeamStudioStore = create<TeamStudioState>()(
     }),
     {
       name: TEAM_STUDIO_KEY,
+      onRehydrateStorage: () => (state, error) => {
+        state?.setHasHydrated(!error);
+      },
     },
   ),
 );

@@ -8,7 +8,7 @@ interface AegisAPI {
     isMaximized: () => Promise<boolean>;
   };
   config: {
-    // AEGIS app settings (aegis-config.json)
+    // OntoSynth app settings (ontosynth-config.json)
     get: () => Promise<any>;
     save: (config: any) => Promise<{ success: boolean }>;
     // OpenClaw config (clawdbot.json) management

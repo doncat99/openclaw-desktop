@@ -77,7 +77,7 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             clientId: 'openclaw-control-ui',
-            clientName: 'AEGIS Desktop',
+            clientName: 'OntoSynth Desktop',
             platform: navigator.platform?.toLowerCase().includes('mac') ? 'macos' : navigator.platform?.toLowerCase().includes('linux') ? 'linux' : 'windows',
             scopes: ['operator.read', 'operator.write', 'operator.admin'],
           }),
@@ -301,8 +301,8 @@ export function PairingScreen({ gatewayHttpUrl, onPaired, onCancel, errorMessage
               </p>
 
               {/* CLI command */}
-              <div className="py-3 px-4 rounded-xl bg-aegis-bg-solid border border-aegis-border font-mono text-sm text-aegis-primary select-all text-start" dir="ltr">
-                openclaw pairing approve
+              <div className="py-3 px-4 rounded-xl bg-aegis-bg-solid border border-aegis-border font-mono text-sm text-aegis-primary select-all text-start whitespace-pre-wrap" dir="ltr">
+                {'openclaw devices list\nopenclaw devices approve --latest'}
               </div>
 
               {/* Alternative instructions */}

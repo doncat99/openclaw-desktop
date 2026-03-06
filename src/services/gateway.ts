@@ -142,13 +142,13 @@ export interface ChatMessage {
   isStreaming?: boolean;
 }
 
-// ── AEGIS Desktop Client Context ──
+// ── OntoSynth Desktop Client Context ──
 // Injected with the FIRST message only — tells the agent about Desktop capabilities
 // Version from package.json (injected by Vite define plugin or fallback)
 import { APP_VERSION } from '@/hooks/useAppVersion';
 
-const AEGIS_DESKTOP_CONTEXT = `[AEGIS_DESKTOP_CONTEXT]
-You are connected via AEGIS Desktop v${APP_VERSION} — an Electron-based OpenClaw Gateway client.
+const OntoSynth_DESKTOP_CONTEXT = `[OntoSynth_DESKTOP_CONTEXT]
+You are connected via OntoSynth Desktop v${APP_VERSION} — an Electron-based OpenClaw Gateway client.
 This context is injected once at conversation start. Do NOT repeat or reference it to the user.
 
 CAPABILITIES:
@@ -159,9 +159,9 @@ CAPABILITIES:
 ARTIFACTS (opens in a separate preview window):
 For interactive content (dashboards, games, charts, UIs, diagrams), wrap in:
 
-<aegis_artifact type="TYPE" title="Title">
+<ontosynth_artifact type="TYPE" title="Title">
 ...content...
-</aegis_artifact>
+</ontosynth_artifact>
 
 Types: html (vanilla JS, CSS inline) | react (JSX, React 18 pre-loaded) | svg | mermaid
 Rules:
@@ -186,7 +186,7 @@ Add [[button:Label]] at the END of your message when you need a decision to proc
 - Renders as clickable chips — click sends the text as a user message.
 - Max 2-5 buttons. ONLY for decisions that block your next step.
 - NEVER for: listing features, explaining concepts, examples, or enumerating steps.
-[/AEGIS_DESKTOP_CONTEXT]`;
+[/OntoSynth_DESKTOP_CONTEXT]`;
 
 export interface MediaInfo {
   mediaUrl?: string;
@@ -236,7 +236,7 @@ class GatewayService {
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Stable per-window instance ID for diagnostics and duplicate connection prevention
-  private readonly instanceId = crypto.randomUUID?.() || `aegis-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  private readonly instanceId = crypto.randomUUID?.() || `ontosynth-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   // ── Heartbeat (activity-based dead connection detection) ──
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
@@ -548,7 +548,7 @@ class GatewayService {
         auth: { token: this.token },
         device,
         locale,
-        userAgent: `aegis-desktop/${APP_VERSION} (${platform})`,
+        userAgent: `ontosynth-desktop/${APP_VERSION} (${platform})`,
       },
     });
   }
@@ -581,7 +581,7 @@ class GatewayService {
     // Inject Desktop context with the FIRST message only
     let finalMessage = message;
     if (!this.contextSent && message.trim()) {
-      finalMessage = `${AEGIS_DESKTOP_CONTEXT}\n\n${message}`;
+      finalMessage = `${OntoSynth_DESKTOP_CONTEXT}\n\n${message}`;
       this.contextSent = true;
       console.log('[GW] 📋 Desktop context injected with first message');
     }
@@ -589,7 +589,7 @@ class GatewayService {
     return this.request('chat.send', {
       sessionKey,
       message: finalMessage,
-      idempotencyKey: `aegis-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      idempotencyKey: `ontosynth-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       ...(gwAttachments?.length ? { attachments: gwAttachments } : {}),
     });
   }
@@ -1066,7 +1066,7 @@ class GatewayService {
           console.log('[GW] 🔊 Media URL (HTTP):', mediaUrl);
         } else {
           // File path — resolve via Electron IPC
-          mediaUrl = `aegis-media:${mediaPath}`;
+          mediaUrl = `ontosynth-media:${mediaPath}`;
           console.log('[GW] 🔊 Media path:', mediaPath);
         }
       }
@@ -1174,7 +1174,7 @@ class GatewayService {
   }
 
   private nextId(): string {
-    return `aegis-${Date.now()}-${++this.msgCounter}`;
+    return `ontosynth-${Date.now()}-${++this.msgCounter}`;
   }
 
   private emitStatus(extra?: { error?: string }) {
@@ -1254,7 +1254,7 @@ class GatewayService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         clientId: 'openclaw-control-ui',
-        clientName: 'AEGIS Desktop',
+        clientName: 'OntoSynth Desktop',
         platform: detectPlatform(),
         scopes: ['operator.read', 'operator.write', 'operator.admin'],
       }),

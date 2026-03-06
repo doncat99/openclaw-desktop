@@ -628,7 +628,7 @@
     "needsApproval": "设备需要批准",
     "pairWithGateway": "与网关配对",
     "enterCode": "在网关中输入此代码：",
-    "openTerminal": "打开终端并运行：openclaw devices list，然后 openclaw devicesapprove --latest",
+    "openTerminal": "打开终端并运行：openclaw devices list，然后 openclaw devices approve --latest",
     "orApproveFromUI": "或从 OpenClaw Control UI 批准",
     "waitingApproval": "等待批准...",
     "requestingPairing": "请求配对...",

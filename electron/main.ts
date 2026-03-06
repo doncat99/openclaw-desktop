@@ -30,6 +30,79 @@ try {
 // Windows requires AppUserModelId for desktop notifications (especially in dev mode)
 app.setAppUserModelId('com.aegis.desktop');
 
+const CONFIG_FILE_NAME = 'ontosynth-config.json';
+const LEGACY_CONFIG_FILE_NAME = 'aegis-config.json';
+
+// Keep a single stable Electron userData directory across app renames/dev modes,
+// and migrate legacy config/identity files once so pairing does not reset.
+const STABLE_USER_DATA_DIR_NAME = 'OntoSynth Desktop';
+function ensureStableUserDataDir(): void {
+  try {
+    const appDataDir = app.getPath('appData');
+    const targetUserData = path.join(appDataDir, STABLE_USER_DATA_DIR_NAME);
+    if (app.getPath('userData') !== targetUserData) {
+      app.setPath('userData', targetUserData);
+    }
+    fs.mkdirSync(targetUserData, { recursive: true });
+
+    const identityFile = 'device-identity.json';
+    const targetConfigPath = path.join(targetUserData, CONFIG_FILE_NAME);
+    const targetLegacyConfigPath = path.join(targetUserData, LEGACY_CONFIG_FILE_NAME);
+    const hasExisting = fs.existsSync(targetConfigPath) || fs.existsSync(path.join(targetUserData, identityFile));
+    if (hasExisting) return;
+
+    const legacyDirs = [
+      'AEGIS Desktop',
+      'aegis-desktop',
+      'openclaw-desktop',
+      'ontosynth-desktop',
+    ];
+
+    for (const legacy of legacyDirs) {
+      const legacyPath = path.join(appDataDir, legacy);
+      if (legacyPath === targetUserData || !fs.existsSync(legacyPath)) continue;
+
+      let copied = 0;
+
+      // Migrate device identity
+      const srcIdentity = path.join(legacyPath, identityFile);
+      const dstIdentity = path.join(targetUserData, identityFile);
+      if (fs.existsSync(srcIdentity) && !fs.existsSync(dstIdentity)) {
+        fs.copyFileSync(srcIdentity, dstIdentity);
+        copied += 1;
+      }
+
+      // Migrate config into the new file name
+      if (!fs.existsSync(targetConfigPath)) {
+        const configCandidates = [
+          path.join(legacyPath, CONFIG_FILE_NAME),
+          path.join(legacyPath, LEGACY_CONFIG_FILE_NAME),
+        ];
+        for (const srcConfig of configCandidates) {
+          if (fs.existsSync(srcConfig)) {
+            fs.copyFileSync(srcConfig, targetConfigPath);
+            copied += 1;
+            break;
+          }
+        }
+      }
+      if (copied > 0) {
+        console.log(`[Config] Migrated ${copied} file(s) from legacy userData: ${legacyPath}`);
+        break;
+      }
+    }
+
+    // Local rename fallback inside the target directory
+    if (!fs.existsSync(targetConfigPath) && fs.existsSync(targetLegacyConfigPath)) {
+      fs.copyFileSync(targetLegacyConfigPath, targetConfigPath);
+      console.log(`[Config] Migrated legacy config filename to ${CONFIG_FILE_NAME}`);
+    }
+  } catch (err) {
+    console.warn('[Config] Failed to stabilize userData path:', err);
+  }
+}
+ensureStableUserDataDir();
+
 // ═══════════════════════════════════════════════════════════
 // Device Identity (Ed25519) — Required for Gateway operator scopes
 // ═══════════════════════════════════════════════════════════
@@ -98,7 +171,8 @@ function getDeviceIdentity(): DeviceIdentity {
 // Config
 // ═══════════════════════════════════════════════════════════
 
-const CONFIG_PATH = path.join(app.getPath('userData'), 'aegis-config.json');
+const CONFIG_PATH = path.join(app.getPath('userData'), CONFIG_FILE_NAME);
+const LEGACY_CONFIG_PATH = path.join(app.getPath('userData'), LEGACY_CONFIG_FILE_NAME);
 const isDev = !app.isPackaged;
 
 interface AegisConfig {
@@ -128,6 +202,12 @@ let config: AegisConfig = {
 
 function loadConfig(): void {
   try {
+    // One-time in-place migration from legacy file name.
+    if (!fs.existsSync(CONFIG_PATH) && fs.existsSync(LEGACY_CONFIG_PATH)) {
+      fs.copyFileSync(LEGACY_CONFIG_PATH, CONFIG_PATH);
+      console.log(`[Config] Migrated ${LEGACY_CONFIG_FILE_NAME} -> ${CONFIG_FILE_NAME}`);
+    }
+
     if (fs.existsSync(CONFIG_PATH)) {
       const data = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
       config = { ...config, ...data };
@@ -470,7 +550,7 @@ function setupIPC(): void {
     return { success: true };
   });
 
-  // ── Settings: sync individual key from UI (localStorage) → aegis-config.json ──
+  // ── Settings: sync individual key from UI (localStorage) → ontosynth-config.json ──
   ipcMain.handle('settings:save', (_e, key: string, value: any) => {
     const configKeyMap: Partial<Record<string, keyof AegisConfig>> = {
       gatewayUrl: 'gatewayUrl',
@@ -649,7 +729,7 @@ function setupIPC(): void {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           clientId: 'openclaw-control-ui',
-          clientName: 'AEGIS Desktop',
+          clientName: 'OntoSynth Desktop',
           platform: process.platform,
           scopes: ['operator.read', 'operator.write', 'operator.admin'],
         }),

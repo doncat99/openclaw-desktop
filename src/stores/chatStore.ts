@@ -1,10 +1,48 @@
 import { create } from 'zustand';
+import { getStorageItem, migrateStorageKey, setStorageItem, storageKey } from '@/utils/storage';
 
 // ═══════════════════════════════════════════════════════════
 // Chat Store — Message, Session, Tabs & Usage State
 // ═══════════════════════════════════════════════════════════
 
 const MAIN_SESSION = 'agent:main:main';
+const CHAT_LAST_SESSION_KEY = storageKey('chat-last-session');
+const CHAT_OPEN_TABS_KEY = storageKey('chat-open-tabs');
+migrateStorageKey(CHAT_LAST_SESSION_KEY, 'aegis-chat-last-session');
+migrateStorageKey(CHAT_OPEN_TABS_KEY, 'aegis-chat-open-tabs');
+
+function normalizeOpenTabs(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [MAIN_SESSION];
+  const seen = new Set<string>();
+  const tabs: string[] = [];
+  for (const value of raw) {
+    const key = String(value || '').trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    tabs.push(key);
+  }
+  if (!tabs.includes(MAIN_SESSION)) tabs.unshift(MAIN_SESSION);
+  return tabs;
+}
+
+function readOpenTabsFromStorage(): string[] {
+  const raw = getStorageItem(CHAT_OPEN_TABS_KEY);
+  if (!raw) return [MAIN_SESSION];
+  try {
+    return normalizeOpenTabs(JSON.parse(raw));
+  } catch {
+    return [MAIN_SESSION];
+  }
+}
+
+function persistOpenTabs(tabs: string[]): void {
+  setStorageItem(CHAT_OPEN_TABS_KEY, JSON.stringify(normalizeOpenTabs(tabs)));
+}
+
+function readLastSessionKeyFromStorage(): string {
+  const stored = String(getStorageItem(CHAT_LAST_SESSION_KEY) || '').trim();
+  return stored || MAIN_SESSION;
+}
 
 export interface ChatMessage {
   id: string;
@@ -261,32 +299,90 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // ── Sessions ──
   sessions: [{ key: MAIN_SESSION, label: 'Main Session' }],
-  activeSessionKey: MAIN_SESSION,
+  activeSessionKey: readLastSessionKeyFromStorage(),
 
-  setSessions: (sessions) => set({ sessions }),
+  setSessions: (sessions) => set((state) => {
+    const sessionKeys = new Set(sessions.map((s) => s.key));
+    const hasSession = (key: string) => key === MAIN_SESSION || sessionKeys.has(key);
+    const pickLatestTeamSession = (): string => {
+      const candidates = sessions.filter((s) => {
+        const key = String(s.key || '');
+        if (!key.startsWith('agent:team-')) return false;
+        if (key.includes(':subagent:') || key.includes(':cron:')) return false;
+        return true;
+      });
+      if (candidates.length === 0) return '';
+      const toTs = (value?: string) => {
+        if (!value) return 0;
+        const parsed = new Date(value).getTime();
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+      candidates.sort((a, b) => toTs(b.lastTimestamp) - toTs(a.lastTimestamp));
+      return candidates[0]?.key || '';
+    };
+
+    let nextTabs = normalizeOpenTabs(state.openTabs).filter(hasSession);
+    if (!nextTabs.includes(MAIN_SESSION)) nextTabs.unshift(MAIN_SESSION);
+
+    let nextActive = state.activeSessionKey;
+    const storedLast = String(getStorageItem(CHAT_LAST_SESSION_KEY) || '').trim();
+    const latestTeamSession = pickLatestTeamSession();
+
+    if (!hasSession(nextActive)) {
+      if (storedLast && hasSession(storedLast)) nextActive = storedLast;
+      else nextActive = MAIN_SESSION;
+    }
+    if (
+      latestTeamSession &&
+      nextActive === MAIN_SESSION &&
+      (!storedLast || storedLast === MAIN_SESSION)
+    ) {
+      nextActive = latestTeamSession;
+    }
+
+    if (!nextTabs.includes(nextActive)) nextTabs.push(nextActive);
+
+    persistOpenTabs(nextTabs);
+    setStorageItem(CHAT_LAST_SESSION_KEY, nextActive);
+
+    return {
+      sessions,
+      openTabs: nextTabs,
+      activeSessionKey: nextActive,
+      messages: state.messagesPerSession[nextActive] || state.messages,
+    };
+  }),
 
   setActiveSession: (key) => {
     const state = get();
+    const nextTabs = state.openTabs.includes(key) ? state.openTabs : [...state.openTabs, key];
+    persistOpenTabs(nextTabs);
+    setStorageItem(CHAT_LAST_SESSION_KEY, key);
     // Cache current messages before switching
     const cached = state.messagesPerSession[key];
     set({
       activeSessionKey: key,
+      openTabs: nextTabs,
       messages: cached || [],
       isTyping: false,
     });
   },
 
   // ── Tabs ──
-  openTabs: [MAIN_SESSION],
+  openTabs: readOpenTabsFromStorage(),
 
   openTab: (key) => set((state) => {
     if (state.openTabs.includes(key)) {
       // Already open — just activate
       const cached = state.messagesPerSession[key];
+      setStorageItem(CHAT_LAST_SESSION_KEY, key);
       return { activeSessionKey: key, messages: cached || [], isTyping: false };
     }
+    const nextTabs = [...state.openTabs, key];
+    persistOpenTabs(nextTabs);
+    setStorageItem(CHAT_LAST_SESSION_KEY, key);
     return {
-      openTabs: [...state.openTabs, key],
+      openTabs: nextTabs,
       activeSessionKey: key,
       messages: state.messagesPerSession[key] || [],
       isTyping: false,
@@ -302,6 +398,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const newActive = state.activeSessionKey === key
       ? newTabs[newTabs.length - 1]
       : state.activeSessionKey;
+    persistOpenTabs(newTabs);
+    setStorageItem(CHAT_LAST_SESSION_KEY, newActive);
     return {
       openTabs: newTabs,
       activeSessionKey: newActive,
@@ -310,7 +408,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     };
   }),
 
-  reorderTabs: (keys) => set({ openTabs: keys }),
+  reorderTabs: (keys) => {
+    const normalized = normalizeOpenTabs(keys);
+    persistOpenTabs(normalized);
+    set({ openTabs: normalized });
+  },
 
   // ── Token Usage ──
   tokenUsage: null,

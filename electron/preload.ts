@@ -23,7 +23,7 @@ const api = {
 
   // ── Config ──
   config: {
-    // AEGIS app settings (aegis-config.json)
+    // OntoSynth app settings (ontosynth-config.json)
     get: () => ipcRenderer.invoke('config:get'),
     save: (config: any) => ipcRenderer.invoke('config:save', config),
     // OpenClaw config (clawdbot.json) management
@@ -33,7 +33,7 @@ const api = {
     restart: () => ipcRenderer.invoke('config:restart'),
   },
 
-  // ── Settings (sync individual key/value to aegis-config.json) ──
+  // ── Settings (sync individual key/value to ontosynth-config.json) ──
   settings: {
     save: (key: string, value: any) => ipcRenderer.invoke('settings:save', key, value),
   },

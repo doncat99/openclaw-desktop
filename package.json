@@ -1,7 +1,7 @@
 {
-  "name": "aegis-desktop",
+  "name": "ontosynth-desktop",
   "version": "5.4.1",
-  "description": "AEGIS Desktop — Advanced Chat Client for OpenClaw Gateway",
+  "description": "Ontosynth Desktop — Advanced Chat Client for OpenClaw Gateway",
   "main": "dist-electron/main.js",
   "author": "Rashed",
   "license": "MIT",

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { CircleHelp, RefreshCw } from 'lucide-react';
 import clsx from 'clsx';
@@ -825,6 +825,9 @@ function parseJsonObject(raw: string): JsonObject {
 
 export function StepFlowPage() {
   const connected = useChatStore((state) => state.connected);
+  const profileRequestRef = useRef(0);
+  const artifactsRequestRef = useRef(0);
+  const artifactReadRequestRef = useRef(0);
   const [workflowMode, setWorkflowMode] = useState<WorkflowMode>('intro');
   const [newApplicationName, setNewApplicationName] = useState('');
   const [newApplicationId, setNewApplicationId] = useState('');
@@ -1354,6 +1357,8 @@ export function StepFlowPage() {
         return;
       }
       try {
+        const requestId = ++profileRequestRef.current;
+        const requestAppId = applicationId;
         const payload = await gateway.call('ontosynth.creation.phase.profile', {
           applicationId,
           documentName: preferredDocumentName || undefined,
@@ -1361,6 +1366,8 @@ export function StepFlowPage() {
         if (!payload || payload.status === 'error') {
           throw new Error(getErrorMessage(payload?.error, 'ontosynth.creation.phase.profile failed'));
         }
+        if (profileRequestRef.current !== requestId) return;
+        if (selectedApplicationId !== requestAppId) return;
 
         const parsedDocs = parseCreationDocuments(payload);
         const parsedPhases = parseCreationPhases(payload);
@@ -1387,6 +1394,7 @@ export function StepFlowPage() {
           setRawJson(backendRawJson);
         }
       } catch (error) {
+        if (selectedApplicationId !== applicationId) return;
         setDocuments([]);
         setPhases([]);
         setSelectedDocumentName('');
@@ -1394,7 +1402,7 @@ export function StepFlowPage() {
         setApplicationsError(getErrorMessage(error, 'Failed to load creation phase profile'));
       }
     },
-    [connected, selectedApplicationName],
+    [connected, selectedApplicationId, selectedApplicationName],
   );
 
   const loadArtifacts = useCallback(async () => {
@@ -1410,6 +1418,10 @@ export function StepFlowPage() {
     }
     setArtifactsLoading(true);
     setArtifactsError('');
+    const requestId = ++artifactsRequestRef.current;
+    const requestAppId = selectedApplicationId;
+    const requestDocumentName = selectedDocumentName;
+    const requestPhaseId = selectedPhaseId;
     try {
       const payload = await gateway.call('ontosynth.creation.artifacts.list', {
         applicationId: selectedApplicationId,
@@ -1417,6 +1429,14 @@ export function StepFlowPage() {
         phaseId: selectedPhaseId || undefined,
         limit: 400,
       });
+      if (artifactsRequestRef.current !== requestId) return;
+      if (
+        requestAppId !== selectedApplicationId ||
+        requestDocumentName !== selectedDocumentName ||
+        requestPhaseId !== selectedPhaseId
+      ) {
+        return;
+      }
       if (!payload || payload.status === 'error') {
         throw new Error(getErrorMessage(payload?.error, 'ontosynth.creation.artifacts.list failed'));
       }
@@ -1431,11 +1451,21 @@ export function StepFlowPage() {
         return parsedArtifacts[0]?.relativePath || '';
       });
     } catch (error) {
+      if (
+        artifactsRequestRef.current !== requestId ||
+        requestAppId !== selectedApplicationId ||
+        requestDocumentName !== selectedDocumentName ||
+        requestPhaseId !== selectedPhaseId
+      ) {
+        return;
+      }
       setArtifacts([]);
       setSelectedArtifactPath('');
       setArtifactsError(getErrorMessage(error, 'Failed to load artifacts'));
     } finally {
-      setArtifactsLoading(false);
+      if (artifactsRequestRef.current === requestId) {
+        setArtifactsLoading(false);
+      }
     }
   }, [connected, selectedApplicationId, selectedDocumentName, selectedPhaseId]);
 
@@ -1450,8 +1480,12 @@ export function StepFlowPage() {
     }
     setArtifactReadLoading(true);
     setArtifactStatus('');
+    const requestId = ++artifactReadRequestRef.current;
+    const requestArtifactPath = selectedArtifactPath;
     try {
       const payload = await gateway.call('ontosynth.creation.artifacts.read', { relativePath: selectedArtifactPath });
+      if (artifactReadRequestRef.current !== requestId) return;
+      if (requestArtifactPath !== selectedArtifactPath) return;
       if (!payload || payload.status === 'error') {
         throw new Error(getErrorMessage(payload?.error, 'ontosynth.creation.artifacts.read failed'));
       }
@@ -1479,6 +1513,8 @@ export function StepFlowPage() {
       }
       setArtifactDirty(false);
     } catch (error) {
+      if (artifactReadRequestRef.current !== requestId) return;
+      if (requestArtifactPath !== selectedArtifactPath) return;
       setArtifactKind('');
       setArtifactMime('');
       setArtifactText('');
@@ -1486,7 +1522,9 @@ export function StepFlowPage() {
       setArtifactDirty(false);
       setArtifactStatus(getErrorMessage(error, 'Failed to read artifact'));
     } finally {
-      setArtifactReadLoading(false);
+      if (artifactReadRequestRef.current === requestId) {
+        setArtifactReadLoading(false);
+      }
     }
   }, [connected, selectedArtifactPath]);
 

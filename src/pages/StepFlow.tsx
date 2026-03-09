@@ -2046,10 +2046,20 @@ export function StepFlowPage() {
           mode: 'rerun_pipeline',
           cleanPhase: false,
         });
-        if (!runPayload || runPayload.status === 'error') {
-          throw new Error(getErrorMessage(runPayload?.error, 'ontosynth.creation.regenerate.start failed'));
-        }
         const runRecord = asRecord(runPayload) || {};
+        const startTransportStatus = pickString(runRecord, ['status']).toLowerCase() || 'ok';
+        if (!runPayload || startTransportStatus !== 'ok') {
+          const busyHint =
+            startTransportStatus === 'busy'
+              ? 'Another regeneration run is already in progress.'
+              : '';
+          throw new Error(
+            getErrorMessage(
+              runPayload && typeof runPayload === 'object' ? (runPayload as Record<string, unknown>).error : null,
+              busyHint || 'ontosynth.creation.regenerate.start failed',
+            ),
+          );
+        }
         const runId = pickString(runRecord, ['run_id', 'runId']);
         const statusRaw = pickString(runRecord, ['run_status', 'runStatus', 'status']).toLowerCase();
         const runStatus: 'running' | 'success' | 'error' | 'cancelled' =
@@ -2223,6 +2233,7 @@ export function StepFlowPage() {
     if (!createPipelineRunId || createPipelineStatus !== 'running') return;
     let cancelled = false;
     let inFlight = false;
+    let consecutivePollErrors = 0;
     const timer = window.setInterval(async () => {
       if (cancelled || inFlight) return;
       inFlight = true;
@@ -2250,6 +2261,7 @@ export function StepFlowPage() {
           window.clearInterval(timer);
           return;
         }
+        consecutivePollErrors = 0;
         setCreatePipelineLastError('');
         const record = asRecord(payload) || {};
         const statusRaw = pickString(record, ['run_status', 'runStatus', 'status']).toLowerCase();
@@ -2398,21 +2410,17 @@ export function StepFlowPage() {
         }
       } catch (error) {
         const message = getErrorMessage(error, 'Polling regenerate.status failed');
+        consecutivePollErrors += 1;
         setCreatePipelineLastError(message);
-        setCreatePipelineStatus('error');
-        setCreatePipelineMessage(message);
-        setCreateProgressMessage('Create flow failed');
-        markCreateProgressStep('pipeline', 'error', message);
-        markCreateProgressStep('finish', 'error', 'Create flow failed');
-        setCreatingApplication(false);
         setCreatePipelineDebugText(
           JSON.stringify(
             {
               runId: createPipelineRunId,
-              status: 'error',
+              status: createPipelineStatus,
               applicationId: createPipelineApplicationId,
               pollError: message,
               pollCount: createPipelinePollCount + 1,
+              consecutivePollErrors,
               at: new Date().toISOString(),
             },
             null,
@@ -2420,7 +2428,17 @@ export function StepFlowPage() {
           ),
         );
         setCreateProgressUpdatedAt(Date.now());
-        window.clearInterval(timer);
+        if (consecutivePollErrors >= 3) {
+          setCreatePipelineStatus('error');
+          setCreatePipelineMessage(message);
+          setCreateProgressMessage('Create flow failed');
+          markCreateProgressStep('pipeline', 'error', message);
+          markCreateProgressStep('finish', 'error', 'Create flow failed');
+          setCreatingApplication(false);
+          window.clearInterval(timer);
+        } else {
+          setCreatePipelineMessage(`Polling warning (${consecutivePollErrors}/3): ${message}`);
+        }
       } finally {
         inFlight = false;
       }

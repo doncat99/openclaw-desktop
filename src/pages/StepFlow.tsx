@@ -2222,7 +2222,10 @@ export function StepFlowPage() {
   useEffect(() => {
     if (!createPipelineRunId || createPipelineStatus !== 'running') return;
     let cancelled = false;
+    let inFlight = false;
     const timer = window.setInterval(async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
       try {
         setCreatePipelinePollCount((value) => value + 1);
         const statusParams: Record<string, unknown> = {
@@ -2244,6 +2247,7 @@ export function StepFlowPage() {
           markCreateProgressStep('pipeline', 'error', pollError);
           markCreateProgressStep('finish', 'error', 'Create flow failed');
           setCreatingApplication(false);
+          window.clearInterval(timer);
           return;
         }
         setCreatePipelineLastError('');
@@ -2395,11 +2399,17 @@ export function StepFlowPage() {
       } catch (error) {
         const message = getErrorMessage(error, 'Polling regenerate.status failed');
         setCreatePipelineLastError(message);
+        setCreatePipelineStatus('error');
+        setCreatePipelineMessage(message);
+        setCreateProgressMessage('Create flow failed');
+        markCreateProgressStep('pipeline', 'error', message);
+        markCreateProgressStep('finish', 'error', 'Create flow failed');
+        setCreatingApplication(false);
         setCreatePipelineDebugText(
           JSON.stringify(
             {
               runId: createPipelineRunId,
-              status: createPipelineStatus,
+              status: 'error',
               applicationId: createPipelineApplicationId,
               pollError: message,
               pollCount: createPipelinePollCount + 1,
@@ -2410,6 +2420,9 @@ export function StepFlowPage() {
           ),
         );
         setCreateProgressUpdatedAt(Date.now());
+        window.clearInterval(timer);
+      } finally {
+        inFlight = false;
       }
     }, 2500);
     return () => {

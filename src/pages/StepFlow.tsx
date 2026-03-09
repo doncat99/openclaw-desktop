@@ -456,14 +456,12 @@ function parsePipelineRuntimePhases(payload: unknown): PipelinePhase[] {
         ? (normalizedStatus as PipelinePhaseStatus)
         : 'pending';
       const reason = pickString(phase, ['reason']);
-      return {
-        id,
-        title,
-        status,
-        reason,
-      } satisfies PipelinePhase;
+      const result: PipelinePhase = reason
+        ? { id, title, status, reason }
+        : { id, title, status };
+      return result;
     })
-    .filter((item): item is PipelinePhase => !!item);
+    .filter((item): item is PipelinePhase => item !== null);
 }
 
 function phaseStatusDotClass(status: PipelinePhaseStatus): string {
@@ -735,8 +733,8 @@ function normalizeStep(raw: unknown, index: number): FlowStep | null {
       title: fallbackTitle,
       content,
       bullets: [],
-      requireConfirm: true,
-      confirmText: 'I confirm this step',
+      requireConfirm: false,
+      confirmText: '',
     };
   }
 
@@ -761,8 +759,8 @@ function normalizeStep(raw: unknown, index: number): FlowStep | null {
     .filter((item) => item.length > 0);
 
   const id = nonEmptyString(step.id) || `step-${index + 1}`;
-  const requireConfirm = false;
-  const confirmText = '';
+  const requireConfirm = step.requireConfirm === true;
+  const confirmText = requireConfirm ? (nonEmptyString(step.confirmText) || 'I confirm this step') : '';
 
   return {
     id,
@@ -1495,6 +1493,7 @@ export function StepFlowPage() {
   const saveArtifact = useCallback(async () => {
     if (!connected || !selectedArtifactPath) return;
     if (!(artifactKind === 'json' || artifactKind === 'text')) return;
+    if (!selectedArtifact?.editable) return;
     try {
       const payload = await gateway.call('ontosynth.creation.artifacts.write', {
         relativePath: selectedArtifactPath,
@@ -1509,7 +1508,7 @@ export function StepFlowPage() {
     } catch (error) {
       setArtifactStatus(getErrorMessage(error, 'Failed to save artifact'));
     }
-  }, [connected, selectedArtifactPath, artifactKind, artifactText, loadArtifacts]);
+  }, [connected, selectedArtifact, selectedArtifactPath, artifactKind, artifactText, loadArtifacts]);
 
   const populateSlideIdsFromArtifact = useCallback(() => {
     if (artifactKind !== 'json' || !artifactText.trim()) {
@@ -2161,7 +2160,21 @@ export function StepFlowPage() {
         };
         if (createPipelineApplicationId) statusParams.applicationId = createPipelineApplicationId;
         const payload = await gateway.call('ontosynth.creation.regenerate.status', statusParams);
-        if (cancelled || !payload || payload.status === 'error') return;
+        if (cancelled) return;
+        if (!payload || payload.status === 'error') {
+          const pollError = getErrorMessage(
+            payload && typeof payload === 'object' ? (payload as Record<string, unknown>).error : null,
+            'ontosynth.creation.regenerate.status failed',
+          );
+          setCreatePipelineLastError(pollError);
+          setCreatePipelineStatus('error');
+          setCreatePipelineMessage(pollError);
+          setCreateProgressMessage('Create flow failed');
+          markCreateProgressStep('pipeline', 'error', pollError);
+          markCreateProgressStep('finish', 'error', 'Create flow failed');
+          setCreatingApplication(false);
+          return;
+        }
         setCreatePipelineLastError('');
         const record = asRecord(payload) || {};
         const statusRaw = pickString(record, ['run_status', 'runStatus', 'status']).toLowerCase();
@@ -3849,10 +3862,10 @@ export function StepFlowPage() {
               <button
                 type="button"
                 onClick={() => void saveArtifact()}
-                disabled={!artifactDirty || !(artifactKind === 'json' || artifactKind === 'text')}
+                disabled={!artifactDirty || !(artifactKind === 'json' || artifactKind === 'text') || !selectedArtifact?.editable}
                 className={clsx(
                   'px-2.5 py-1.5 text-[12px] rounded-lg border',
-                  !artifactDirty || !(artifactKind === 'json' || artifactKind === 'text')
+                  !artifactDirty || !(artifactKind === 'json' || artifactKind === 'text') || !selectedArtifact?.editable
                     ? 'border-aegis-border text-aegis-text-dim opacity-60 cursor-not-allowed'
                     : 'border-aegis-success/30 bg-aegis-success/[0.08] text-aegis-success hover:bg-aegis-success/[0.14]',
                 )}
@@ -3862,6 +3875,9 @@ export function StepFlowPage() {
             </div>
             {selectedArtifact && (
               <p className="mt-1 text-[11px] text-aegis-text-dim break-all">{selectedArtifact.relativePath}</p>
+            )}
+            {selectedArtifact && !selectedArtifact.editable && (
+              <p className="mt-1 text-[11px] text-aegis-warning">This artifact is read-only.</p>
             )}
             {artifactStatus && <p className="mt-1 text-[11px] text-aegis-text-dim">{artifactStatus}</p>}
             {regenStatus.logTail && (
@@ -3882,10 +3898,12 @@ export function StepFlowPage() {
                 <textarea
                   value={artifactText}
                   onChange={(event) => {
+                    if (!selectedArtifact?.editable) return;
                     setArtifactText(event.target.value);
                     setArtifactDirty(true);
                     setArtifactStatus('');
                   }}
+                  readOnly={!selectedArtifact?.editable}
                   className="w-full h-full bg-transparent p-3 text-[12px] text-aegis-text font-mono resize-none outline-none"
                   spellCheck={false}
                 />

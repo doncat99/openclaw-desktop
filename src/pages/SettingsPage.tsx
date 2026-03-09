@@ -4,6 +4,7 @@
 
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import {
   Settings, Bell, BellOff, Globe, Volume2, VolumeX,
   Wifi, WifiOff, Cpu, CheckCircle, Loader2, Keyboard, Copy, Sun, Moon
@@ -20,9 +21,11 @@ import { notifications } from '@/services/notifications';
 import { changeLanguage } from '@/i18n';
 import clsx from 'clsx';
 import neuraLogo from '../../assets/logo.png';
+import { ConfigManagerPage } from '@/pages/ConfigManager';
 
 export function SettingsPageFull() {
   const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const {
     theme, setTheme,
     language, setLanguage,
@@ -46,6 +49,14 @@ export function SettingsPageFull() {
   const [editUrl, setEditUrl] = useState(gatewayUrl);
   const [editToken, setEditToken] = useState(gatewayToken);
   const [connectionDirty, setConnectionDirty] = useState(false);
+  const activePanel: 'general' | 'config' = searchParams.get('panel') === 'config' ? 'config' : 'general';
+
+  const switchPanel = (panel: 'general' | 'config') => {
+    const next = new URLSearchParams(searchParams);
+    if (panel === 'config') next.set('panel', 'config');
+    else next.delete('panel');
+    setSearchParams(next, { replace: true });
+  };
 
   const mainSession = sessions.find((s) => (s.key || '') === 'agent:main:main');
   const mainModel = mainSession?.model || '—';
@@ -159,6 +170,36 @@ export function SettingsPageFull() {
     </button>
   );
 
+  if (activePanel === 'config') {
+    return (
+      <PageTransition className="p-6 h-full min-h-0 flex flex-col">
+        <div className="shrink-0 space-y-3">
+          <h1 className="text-[22px] font-bold text-aegis-text flex items-center gap-3">
+            <Settings size={24} className="text-aegis-text-dim" />
+            {t('settings.title')}
+          </h1>
+          <div className="inline-flex rounded-xl border border-aegis-border bg-aegis-card p-1 gap-1">
+            <button
+              onClick={() => switchPanel('general')}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-medium text-aegis-text-dim hover:text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+            >
+              General
+            </button>
+            <button
+              onClick={() => switchPanel('config')}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-aegis-primary/15 border border-aegis-primary/30 text-aegis-primary"
+            >
+              {t('config.title')}
+            </button>
+          </div>
+        </div>
+        <div className="mt-4 flex-1 min-h-0 overflow-hidden rounded-2xl border border-aegis-border bg-aegis-card/50">
+          <ConfigManagerPage />
+        </div>
+      </PageTransition>
+    );
+  }
+
   return (
     <PageTransition className="p-6 space-y-6 max-w-[700px] mx-auto">
       <div>
@@ -166,6 +207,20 @@ export function SettingsPageFull() {
           <Settings size={24} className="text-aegis-text-dim" />
           {t('settings.title')}
         </h1>
+        <div className="mt-3 inline-flex rounded-xl border border-aegis-border bg-aegis-card p-1 gap-1">
+          <button
+            onClick={() => switchPanel('general')}
+            className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-aegis-primary/15 border border-aegis-primary/30 text-aegis-primary"
+          >
+            General
+          </button>
+          <button
+            onClick={() => switchPanel('config')}
+            className="px-3 py-1.5 rounded-lg text-[12px] font-medium text-aegis-text-dim hover:text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+          >
+            {t('config.title')}
+          </button>
+        </div>
       </div>
 
       {/* Language */}

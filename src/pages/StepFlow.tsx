@@ -184,6 +184,7 @@ const SAMPLE_FLOW_JSON = `{
 const CREATION_FLOW_STORAGE_KEY = 'ontosynth-creation-flow-json-v1';
 const CREATION_APP_STORAGE_KEY = 'ontosynth-creation-selected-app-v1';
 const LEGACY_FLOW_STORAGE_KEY = 'ontosynth-stepper-flow-json-v1';
+const NO_SELECTION_APP_ID = '__none__';
 const CREATE_PROGRESS_TEMPLATE: ReadonlyArray<Omit<CreateProgressStep, 'status' | 'detail'>> = [
   { id: 'validate', title: 'Validate Input' },
   { id: 'create', title: 'Create Application Scaffold' },
@@ -282,18 +283,21 @@ const DEFAULT_PHASE_SETTINGS: Record<string, JsonObject> = {
 };
 
 function flowStorageKey(applicationId: string): string {
-  return `${CREATION_FLOW_STORAGE_KEY}:${applicationId || 'default'}`;
+  return `${CREATION_FLOW_STORAGE_KEY}:${applicationId || NO_SELECTION_APP_ID}`;
 }
 
 function readInitialSelectedApplicationId(): string {
-  if (typeof window === 'undefined') return 'default';
+  if (typeof window === 'undefined') return '';
   try {
     const saved = window.localStorage.getItem(CREATION_APP_STORAGE_KEY);
-    if (saved && saved.trim()) return saved.trim();
+    if (saved && saved.trim()) {
+      const value = saved.trim();
+      return value === NO_SELECTION_APP_ID ? '' : value;
+    }
   } catch {
     // Ignore storage read errors and fall back to default.
   }
-  return 'default';
+  return '';
 }
 
 function readSavedFlowJson(applicationId: string): string | null {
@@ -301,7 +305,7 @@ function readSavedFlowJson(applicationId: string): string | null {
   try {
     const saved = window.localStorage.getItem(flowStorageKey(applicationId));
     if (saved && saved.trim()) return saved;
-    if (!applicationId || applicationId === 'default') {
+    if (!applicationId) {
       const legacy = window.localStorage.getItem(LEGACY_FLOW_STORAGE_KEY);
       if (legacy && legacy.trim()) return legacy;
     }
@@ -937,7 +941,7 @@ export function StepFlowPage() {
   const [completed, setCompleted] = useState(false);
   const [confirmByStepId, setConfirmByStepId] = useState<Record<string, boolean>>({});
   const selectedApplicationName = useMemo(() => {
-    if (!selectedApplicationId || selectedApplicationId === 'default') return 'Default';
+    if (!selectedApplicationId) return 'Not selected';
     return applications.find((item) => item.id === selectedApplicationId)?.name || selectedApplicationId;
   }, [applications, selectedApplicationId]);
   const selectedPhase = useMemo(
@@ -996,7 +1000,6 @@ export function StepFlowPage() {
   const slideActionEnabled =
     selectedPhaseId === '07_slide' &&
     !!selectedApplicationId &&
-    selectedApplicationId !== 'default' &&
     !!slideDocId.trim() &&
     !!slideChapterId.trim() &&
     !!slideSectionId.trim() &&
@@ -1357,12 +1360,12 @@ export function StepFlowPage() {
       setApplications(parsed);
       setSelectedApplicationId((current) => {
         if (current && parsed.some((item) => item.id === current)) return current;
-        return parsed[0]?.id || 'default';
+        return parsed[0]?.id || '';
       });
     } catch (error) {
       setApplications([]);
       setApplicationsError(getErrorMessage(error, 'Failed to load OntoSynth applications'));
-      setSelectedApplicationId((current) => current || 'default');
+      setSelectedApplicationId((current) => current || '');
     } finally {
       setApplicationsLoading(false);
     }
@@ -1370,7 +1373,7 @@ export function StepFlowPage() {
 
   const loadCreationProfile = useCallback(
     async (applicationId: string, preferredDocumentName = '') => {
-      if (!connected || !applicationId || applicationId === 'default') {
+      if (!connected || !applicationId) {
         setDocuments([]);
         setPhases([]);
         setSelectedDocumentName('');
@@ -1428,7 +1431,7 @@ export function StepFlowPage() {
   );
 
   const loadArtifacts = useCallback(async () => {
-    if (!connected || !selectedApplicationId || selectedApplicationId === 'default') {
+    if (!connected || !selectedApplicationId) {
       setArtifacts([]);
       setSelectedArtifactPath('');
       return;
@@ -1798,7 +1801,7 @@ export function StepFlowPage() {
       resetRunState();
       try {
         if (typeof window !== 'undefined') {
-          window.localStorage.setItem(flowStorageKey(selectedApplicationId || 'default'), rawJson);
+          window.localStorage.setItem(flowStorageKey(selectedApplicationId), rawJson);
         }
         setSaveStatus(`Saved for ${selectedApplicationName}`);
       } catch {
@@ -2039,9 +2042,20 @@ export function StepFlowPage() {
         setMaterialsStatus('Materials submitted');
         setMaterialsError('');
         markCreateProgressStep('attach', 'success', 'Materials attached');
-        markCreateProgressStep('pipeline', 'running', 'Starting OntoSynth pipeline...');
-        setCreateProgressMessage('Starting OntoSynth pipeline...');
+      } catch (attachError) {
+        const attachMessage = getErrorMessage(attachError, 'Failed to submit materials');
+        setMaterialsError(attachMessage);
+        setMaterialsStatus('');
+        markCreateProgressStep('attach', 'error', attachMessage);
+        markCreateProgressStep('pipeline', 'error', 'Not started');
+        markCreateProgressStep('finish', 'error', 'Application created, materials attach failed');
+        setCreateProgressMessage('Application created, materials attach failed');
+        return;
+      }
 
+      markCreateProgressStep('pipeline', 'running', 'Starting OntoSynth pipeline...');
+      setCreateProgressMessage('Starting OntoSynth pipeline...');
+      try {
         const runPayload = await gateway.call('ontosynth.creation.regenerate.start', {
           applicationId: createdId,
           mode: 'rerun_pipeline',
@@ -2124,14 +2138,30 @@ export function StepFlowPage() {
           markCreateProgressStep('pipeline', 'running', runMessage || 'Pipeline is running');
           setCreateProgressMessage('Pipeline is running...');
         }
-      } catch (attachError) {
-        const attachMessage = getErrorMessage(attachError, 'Failed to submit materials');
-        setMaterialsError(attachMessage);
-        setMaterialsStatus('');
-        markCreateProgressStep('attach', 'error', attachMessage);
-        markCreateProgressStep('pipeline', 'error', 'Not started');
-        markCreateProgressStep('finish', 'error', 'Application created with attach/pipeline error');
-        setCreateProgressMessage('Application created with attach/pipeline error');
+      } catch (pipelineError) {
+        const pipelineMessage = getErrorMessage(pipelineError, 'Failed to start OntoSynth pipeline');
+        setCreatePipelineStatus('error');
+        setCreatePipelineMessage(pipelineMessage);
+        setCreatePipelineLastError(pipelineMessage);
+        setCreatePipelineRunId('');
+        setCreatePipelineLogTail('');
+        setCreatePipelineCurrentPhaseId('');
+        setCreatePipelineSeenPhaseIds([]);
+        setCreatePipelineDebugText(
+          JSON.stringify(
+            {
+              status: 'error',
+              stage: 'pipeline_start',
+              applicationId: createdId,
+              message: pipelineMessage,
+            },
+            null,
+            2,
+          ),
+        );
+        markCreateProgressStep('pipeline', 'error', pipelineMessage);
+        markCreateProgressStep('finish', 'error', 'Application created, pipeline start failed');
+        setCreateProgressMessage('Application created, pipeline start failed');
       }
     } catch (error) {
       const message = getErrorMessage(error, 'Failed to create application');
@@ -2233,7 +2263,7 @@ export function StepFlowPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      window.localStorage.setItem(CREATION_APP_STORAGE_KEY, selectedApplicationId || 'default');
+      window.localStorage.setItem(CREATION_APP_STORAGE_KEY, selectedApplicationId || NO_SELECTION_APP_ID);
     } catch {
       // Ignore storage persistence errors.
     }
@@ -2470,7 +2500,7 @@ export function StepFlowPage() {
   ]);
 
   useEffect(() => {
-    const appId = selectedApplicationId || 'default';
+    const appId = selectedApplicationId;
     const saved = readInitialRawJson(appId);
     try {
       const parsed = parseFlowJson(saved);
@@ -2503,12 +2533,12 @@ export function StepFlowPage() {
   }, [selectedApplicationId, resetRunState]);
 
   useEffect(() => {
-    if (!connected || !selectedApplicationId || selectedApplicationId === 'default') return;
+    if (!connected || !selectedApplicationId) return;
     void loadCreationProfile(selectedApplicationId);
   }, [connected, selectedApplicationId, loadCreationProfile]);
 
   useEffect(() => {
-    if (!connected || !selectedApplicationId || selectedApplicationId === 'default') return;
+    if (!connected || !selectedApplicationId) return;
     if (!selectedDocumentName) return;
     void loadArtifacts();
   }, [connected, selectedApplicationId, selectedDocumentName, selectedPhaseId, loadArtifacts]);
@@ -2531,7 +2561,7 @@ export function StepFlowPage() {
   useEffect(() => {
     if (workflowMode !== 'edit') return;
     const widgetPhaseIds = new Set(['02_structure', '04_knowledge', '06_assessment', '07_slide']);
-    if (!connected || !selectedApplicationId || selectedApplicationId === 'default' || !guidePhaseId) {
+    if (!connected || !selectedApplicationId || !guidePhaseId) {
       setPhaseGuideLoading(false);
       setPhaseGuideError('');
       setPhaseGuideExtra(emptyPhaseGuideExtra());

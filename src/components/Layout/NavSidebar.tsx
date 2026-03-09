@@ -8,12 +8,13 @@ import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import {
   LayoutDashboard, MessageCircle, Kanban, DollarSign,
-  Clock, Bot, Settings, Settings2, Brain, Puzzle,
+  Clock, Bot, Settings, Brain, Puzzle,
   ListChecks,
   Network,
   Terminal,
   Globe,
   Database,
+  SquareStack,
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getDirection } from '@/i18n';
@@ -38,9 +39,9 @@ const navItems: NavItem[] = [
   { to: '/skills', icon: Puzzle, labelKey: 'nav.skills' },
   { to: '/aella', icon: Globe, labelKey: 'nav.aella' },
   { to: '/knowledge', icon: Database, labelKey: 'nav.knowledge' },
+  { to: '/creation', icon: SquareStack, labelKey: 'nav.creation' },
   { to: '/terminal', icon: Terminal, labelKey: 'nav.terminal' },
   { to: '/memory', icon: Brain, labelKey: 'nav.memory', badge: '🧪' },
-  { to: '/config', icon: Settings2, labelKey: 'nav.config' },
 ];
 
 export function NavSidebar() {

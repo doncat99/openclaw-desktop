@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState, useRef } from 'react';
-import { HashRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { AppLayout } from '@/components/Layout/AppLayout';
 import { DashboardPage } from '@/pages/Dashboard';
@@ -12,11 +12,11 @@ import { MemoryExplorerPage } from '@/pages/MemoryExplorer';
 import { SkillsPage as SkillsPageFull } from '@/pages/SkillsPage';
 import { TerminalPage } from '@/pages/TerminalPage';
 import { SettingsPageFull } from '@/pages/SettingsPage';
-import { ConfigManagerPage } from '@/pages/ConfigManager';
 import { TaskRpgPage } from '@/pages/TaskRpg';
 import { TeamMonitorPage } from '@/pages/TeamMonitor';
 import { AellaExplorerPage } from '@/pages/AellaExplorer';
 import { KnowledgeAtlasPage } from '@/pages/KnowledgeAtlas';
+import { StepFlowPage } from '@/pages/StepFlow';
 import { PairingScreen } from '@/components/PairingScreen';
 import { ToastContainer } from '@/components/Toast/ToastContainer';
 import { useChatStore } from '@/stores/chatStore';
@@ -337,9 +337,11 @@ export default function App() {
             <Route path="/skills" element={<SkillsPageFull />} />
             <Route path="/aella" element={<AellaExplorerPage />} />
             <Route path="/knowledge" element={<KnowledgeAtlasPage />} />
+            <Route path="/creation" element={<StepFlowPage />} />
+            <Route path="/stepper" element={<StepFlowPage />} />
             <Route path="/terminal" element={<TerminalPage />} />
             <Route path="/memory" element={<MemoryExplorerPage />} />
-            <Route path="/config" element={<ConfigManagerPage />} />
+            <Route path="/config" element={<Navigate to="/settings?panel=config" replace />} />
             <Route path="/settings" element={<SettingsPageFull />} />
           </Route>
         </Routes>

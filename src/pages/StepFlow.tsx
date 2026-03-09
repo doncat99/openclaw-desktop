@@ -886,6 +886,10 @@ export function StepFlowPage() {
   const [selectedDocumentName, setSelectedDocumentName] = useState('');
   const [selectedPhaseId, setSelectedPhaseId] = useState('');
   const [selectedArtifactPath, setSelectedArtifactPath] = useState('');
+  const selectedApplicationIdRef = useRef(selectedApplicationId);
+  const selectedDocumentNameRef = useRef(selectedDocumentName);
+  const selectedPhaseIdRef = useRef(selectedPhaseId);
+  const selectedArtifactPathRef = useRef(selectedArtifactPath);
   const [artifactKind, setArtifactKind] = useState<'json' | 'text' | 'image' | 'binary' | ''>('');
   const [artifactMime, setArtifactMime] = useState('');
   const [artifactText, setArtifactText] = useState('');
@@ -1008,6 +1012,22 @@ export function StepFlowPage() {
     () => createPhaseSettingsErrorById[activeCreatePhaseSettingsId] || '',
     [createPhaseSettingsErrorById, activeCreatePhaseSettingsId],
   );
+
+  useEffect(() => {
+    selectedApplicationIdRef.current = selectedApplicationId;
+  }, [selectedApplicationId]);
+
+  useEffect(() => {
+    selectedDocumentNameRef.current = selectedDocumentName;
+  }, [selectedDocumentName]);
+
+  useEffect(() => {
+    selectedPhaseIdRef.current = selectedPhaseId;
+  }, [selectedPhaseId]);
+
+  useEffect(() => {
+    selectedArtifactPathRef.current = selectedArtifactPath;
+  }, [selectedArtifactPath]);
 
   useEffect(() => {
     if (!pinnedPhaseReasonId) return;
@@ -1367,7 +1387,7 @@ export function StepFlowPage() {
           throw new Error(getErrorMessage(payload?.error, 'ontosynth.creation.phase.profile failed'));
         }
         if (profileRequestRef.current !== requestId) return;
-        if (selectedApplicationId !== requestAppId) return;
+        if (selectedApplicationIdRef.current !== requestAppId) return;
 
         const parsedDocs = parseCreationDocuments(payload);
         const parsedPhases = parseCreationPhases(payload);
@@ -1394,7 +1414,7 @@ export function StepFlowPage() {
           setRawJson(backendRawJson);
         }
       } catch (error) {
-        if (selectedApplicationId !== applicationId) return;
+        if (selectedApplicationIdRef.current !== applicationId) return;
         setDocuments([]);
         setPhases([]);
         setSelectedDocumentName('');
@@ -1402,7 +1422,7 @@ export function StepFlowPage() {
         setApplicationsError(getErrorMessage(error, 'Failed to load creation phase profile'));
       }
     },
-    [connected, selectedApplicationId, selectedApplicationName],
+    [connected, selectedApplicationName],
   );
 
   const loadArtifacts = useCallback(async () => {
@@ -1431,9 +1451,9 @@ export function StepFlowPage() {
       });
       if (artifactsRequestRef.current !== requestId) return;
       if (
-        requestAppId !== selectedApplicationId ||
-        requestDocumentName !== selectedDocumentName ||
-        requestPhaseId !== selectedPhaseId
+        requestAppId !== selectedApplicationIdRef.current ||
+        requestDocumentName !== selectedDocumentNameRef.current ||
+        requestPhaseId !== selectedPhaseIdRef.current
       ) {
         return;
       }
@@ -1453,9 +1473,9 @@ export function StepFlowPage() {
     } catch (error) {
       if (
         artifactsRequestRef.current !== requestId ||
-        requestAppId !== selectedApplicationId ||
-        requestDocumentName !== selectedDocumentName ||
-        requestPhaseId !== selectedPhaseId
+        requestAppId !== selectedApplicationIdRef.current ||
+        requestDocumentName !== selectedDocumentNameRef.current ||
+        requestPhaseId !== selectedPhaseIdRef.current
       ) {
         return;
       }
@@ -1485,7 +1505,7 @@ export function StepFlowPage() {
     try {
       const payload = await gateway.call('ontosynth.creation.artifacts.read', { relativePath: selectedArtifactPath });
       if (artifactReadRequestRef.current !== requestId) return;
-      if (requestArtifactPath !== selectedArtifactPath) return;
+      if (requestArtifactPath !== selectedArtifactPathRef.current) return;
       if (!payload || payload.status === 'error') {
         throw new Error(getErrorMessage(payload?.error, 'ontosynth.creation.artifacts.read failed'));
       }
@@ -1514,7 +1534,7 @@ export function StepFlowPage() {
       setArtifactDirty(false);
     } catch (error) {
       if (artifactReadRequestRef.current !== requestId) return;
-      if (requestArtifactPath !== selectedArtifactPath) return;
+      if (requestArtifactPath !== selectedArtifactPathRef.current) return;
       setArtifactKind('');
       setArtifactMime('');
       setArtifactText('');

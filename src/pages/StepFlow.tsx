@@ -2469,18 +2469,9 @@ export function StepFlowPage() {
           ),
         );
         setCreateProgressUpdatedAt(Date.now());
-        if (consecutivePollErrors >= 3) {
-          setCreatePipelineStatus('error');
-          setCreatePipelineMessage(message);
-          setCreateProgressMessage('Create flow failed');
-          markCreateProgressStep('pipeline', 'error', message);
-          markCreateProgressStep('finish', 'error', 'Create flow failed');
-          setCreatingApplication(false);
-          createPollErrorStreakRef.current = 0;
-          window.clearInterval(timer);
-        } else {
-          setCreatePipelineMessage(`Polling warning (${consecutivePollErrors}/3): ${message}`);
-        }
+        setCreatePipelineMessage(`Polling warning (${consecutivePollErrors}): ${message}`);
+        markCreateProgressStep('pipeline', 'running', `Status check warning: ${message}`);
+        setCreateProgressMessage('Pipeline is running (status polling warning, retrying)...');
       } finally {
         inFlight = false;
       }

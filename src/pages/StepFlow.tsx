@@ -828,6 +828,7 @@ export function StepFlowPage() {
   const profileRequestRef = useRef(0);
   const artifactsRequestRef = useRef(0);
   const artifactReadRequestRef = useRef(0);
+  const createPollErrorStreakRef = useRef(0);
   const [workflowMode, setWorkflowMode] = useState<WorkflowMode>('intro');
   const [newApplicationName, setNewApplicationName] = useState('');
   const [newApplicationId, setNewApplicationId] = useState('');
@@ -2173,6 +2174,15 @@ export function StepFlowPage() {
     try {
       const payload = await gateway.call('ontosynth.creation.regenerate.cancel', {});
       const record = asRecord(payload) || {};
+      const transportStatus = pickString(record, ['status']).toLowerCase() || 'ok';
+      if (!payload || transportStatus !== 'ok') {
+        throw new Error(
+          getErrorMessage(
+            payload && typeof payload === 'object' ? (payload as Record<string, unknown>).error : null,
+            'Failed to cancel pipeline',
+          ),
+        );
+      }
       const message = pickString(record, ['message']) || 'Pipeline cancelled';
       setCreatePipelineStatus('cancelled');
       setCreatePipelineMessage(message);
@@ -2233,7 +2243,6 @@ export function StepFlowPage() {
     if (!createPipelineRunId || createPipelineStatus !== 'running') return;
     let cancelled = false;
     let inFlight = false;
-    let consecutivePollErrors = 0;
     const timer = window.setInterval(async () => {
       if (cancelled || inFlight) return;
       inFlight = true;
@@ -2258,10 +2267,11 @@ export function StepFlowPage() {
           markCreateProgressStep('pipeline', 'error', pollError);
           markCreateProgressStep('finish', 'error', 'Create flow failed');
           setCreatingApplication(false);
+          createPollErrorStreakRef.current = 0;
           window.clearInterval(timer);
           return;
         }
-        consecutivePollErrors = 0;
+        createPollErrorStreakRef.current = 0;
         setCreatePipelineLastError('');
         const record = asRecord(payload) || {};
         const statusRaw = pickString(record, ['run_status', 'runStatus', 'status']).toLowerCase();
@@ -2410,7 +2420,8 @@ export function StepFlowPage() {
         }
       } catch (error) {
         const message = getErrorMessage(error, 'Polling regenerate.status failed');
-        consecutivePollErrors += 1;
+        createPollErrorStreakRef.current += 1;
+        const consecutivePollErrors = createPollErrorStreakRef.current;
         setCreatePipelineLastError(message);
         setCreatePipelineDebugText(
           JSON.stringify(
@@ -2435,6 +2446,7 @@ export function StepFlowPage() {
           markCreateProgressStep('pipeline', 'error', message);
           markCreateProgressStep('finish', 'error', 'Create flow failed');
           setCreatingApplication(false);
+          createPollErrorStreakRef.current = 0;
           window.clearInterval(timer);
         } else {
           setCreatePipelineMessage(`Polling warning (${consecutivePollErrors}/3): ${message}`);

@@ -1389,6 +1389,7 @@ export function StepFlowPage() {
         if (profileRequestRef.current !== requestId) return;
         if (selectedApplicationIdRef.current !== requestAppId) return;
 
+        setApplicationsError('');
         const parsedDocs = parseCreationDocuments(payload);
         const parsedPhases = parseCreationPhases(payload);
         const selectedDocument = nonEmptyString((payload as Record<string, unknown>).selected_document);
@@ -2248,7 +2249,12 @@ export function StepFlowPage() {
         setCreatePipelineLastError('');
         const record = asRecord(payload) || {};
         const statusRaw = pickString(record, ['run_status', 'runStatus', 'status']).toLowerCase();
-        const isRunningStatus = statusRaw === 'running' || statusRaw === 'started' || statusRaw === 'queued';
+        const isRunningStatus =
+          statusRaw === 'running' ||
+          statusRaw === 'started' ||
+          statusRaw === 'queued' ||
+          statusRaw === 'busy' ||
+          statusRaw === 'ok';
         const nextStatus: 'running' | 'success' | 'error' | 'cancelled' =
           statusRaw === 'success'
             ? 'success'

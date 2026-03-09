@@ -1524,9 +1524,21 @@ export function StepFlowPage() {
 
       setArtifactKind(previewType || '');
       setArtifactMime(mime);
-      if (previewType === 'image' && contentBase64) {
-        setArtifactDataUrl(`data:${mime || 'image/png'};base64,${contentBase64}`);
-        setArtifactText('');
+      if (previewType === 'image') {
+        const trimmedContent = content.trim();
+        if (contentBase64) {
+          setArtifactDataUrl(`data:${mime || 'image/png'};base64,${contentBase64}`);
+          setArtifactText('');
+        } else if (trimmedContent.startsWith('data:')) {
+          setArtifactDataUrl(trimmedContent);
+          setArtifactText('');
+        } else if (trimmedContent && (mime === 'image/svg+xml' || trimmedContent.startsWith('<svg'))) {
+          setArtifactDataUrl(`data:${mime || 'image/svg+xml'};utf8,${encodeURIComponent(content)}`);
+          setArtifactText('');
+        } else {
+          setArtifactDataUrl('');
+          setArtifactText(content);
+        }
       } else {
         setArtifactDataUrl('');
         setArtifactText(content);
@@ -2236,6 +2248,7 @@ export function StepFlowPage() {
         setCreatePipelineLastError('');
         const record = asRecord(payload) || {};
         const statusRaw = pickString(record, ['run_status', 'runStatus', 'status']).toLowerCase();
+        const isRunningStatus = statusRaw === 'running' || statusRaw === 'started' || statusRaw === 'queued';
         const nextStatus: 'running' | 'success' | 'error' | 'cancelled' =
           statusRaw === 'success'
             ? 'success'
@@ -2243,8 +2256,19 @@ export function StepFlowPage() {
               ? 'error'
               : statusRaw === 'cancelled'
                 ? 'cancelled'
-                : 'running';
-        const message = pickString(record, ['message']) || createPipelineMessage;
+                : statusRaw === 'idle'
+                  ? 'cancelled'
+                  : isRunningStatus
+                    ? 'running'
+                    : 'error';
+        const message =
+          pickString(record, ['message']) ||
+          createPipelineMessage ||
+          (statusRaw === 'idle'
+            ? 'Run state reset to idle.'
+            : nextStatus === 'error'
+              ? `Unexpected run status: ${statusRaw || 'unknown'}`
+              : '');
         const runLogTail = pickString(record, ['log_tail', 'logTail']);
         const runtimePhaseRows = parsePipelineRuntimePhases(record);
         const runtimeRecord = asRecord(record.phase_runtime);

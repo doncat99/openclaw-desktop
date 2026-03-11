@@ -59,23 +59,6 @@ function normalizeGatewayAppUrl(target: string): string {
   return `${base}${suffix}`;
 }
 
-function formatBytes(bytes: number | null | undefined): string {
-  if (typeof bytes !== 'number' || Number.isNaN(bytes) || bytes <= 0) return '-';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let unitIdx = 0;
-  let size = bytes;
-  while (size >= 1024 && unitIdx < units.length - 1) {
-    size /= 1024;
-    unitIdx += 1;
-  }
-  return `${size.toFixed(unitIdx === 0 ? 0 : 1)} ${units[unitIdx]}`;
-}
-
-function formatTimestamp(epoch: number | null | undefined): string {
-  if (typeof epoch !== 'number' || Number.isNaN(epoch) || epoch <= 0) return '-';
-  return new Date(epoch * 1000).toLocaleString();
-}
-
 function pickDefaultSource(sources: KnowledgeAtlasSource[]): KnowledgeAtlasSource | null {
   return sources.find((item) => item.kind === 'atlas') || sources[0] || null;
 }
@@ -86,13 +69,10 @@ export function KnowledgeAtlasPage() {
   const [health, setHealth] = useState<KnowledgeAtlasHealthResponse | null>(null);
   const [sources, setSources] = useState<KnowledgeAtlasSource[]>([]);
   const [selectedSourcePath, setSelectedSourcePath] = useState('');
-  const [selectedSourceKind, setSelectedSourceKind] = useState<'units' | 'atlas' | null>(null);
   const [atlasUrl, setAtlasUrl] = useState('');
-  const [lastBuild, setLastBuild] = useState<KnowledgeAtlasBuildResponse | null>(null);
   const [lastBuiltSourcePath, setLastBuiltSourcePath] = useState('');
   const [autoBuildAttemptedSourcePath, setAutoBuildAttemptedSourcePath] = useState('');
 
-  const [statusText, setStatusText] = useState('Idle');
   const [healthError, setHealthError] = useState('');
   const [buildError, setBuildError] = useState('');
   const [loadingHealth, setLoadingHealth] = useState(false);
@@ -149,7 +129,6 @@ export function KnowledgeAtlasPage() {
 
       setBuilding(true);
       setBuildError('');
-      setStatusText('Building Embedding Atlas application ...');
 
       try {
         const payload = (await gateway.call('ontosynth.knowledge.atlas.build', {
@@ -161,25 +140,19 @@ export function KnowledgeAtlasPage() {
           throw new Error(payload?.error || 'ontosynth.knowledge.atlas.build failed');
         }
 
-        setLastBuild(payload);
         if (payload.sources && payload.sources.length > 0) {
           setSources(payload.sources);
         }
 
         if (payload.status !== 'ok' || !payload.app_url) {
           setBuildError(payload.error || 'Atlas build failed');
-          setStatusText('Build failed');
           return;
         }
 
         setLastBuiltSourcePath(selectedSourcePath);
         setAtlasUrl(`${normalizeGatewayAppUrl(payload.app_url)}?t=${Date.now()}`);
-        const cacheLabel = payload.cached ? 'cached app' : 'fresh app';
-        const projectionLabel = payload.generated_projection ? 'projection generated' : 'projection reused';
-        setStatusText(`Ready (${cacheLabel}, ${projectionLabel})`);
       } catch (error) {
         setBuildError(getErrorMessage(error, 'Atlas build request failed'));
-        setStatusText('Build failed');
       } finally {
         setBuilding(false);
       }
@@ -190,14 +163,6 @@ export function KnowledgeAtlasPage() {
   useEffect(() => {
     void loadHealth();
   }, [loadHealth]);
-
-  useEffect(() => {
-    if (!selectedSource) {
-      setSelectedSourceKind(null);
-      return;
-    }
-    setSelectedSourceKind(selectedSource.kind);
-  }, [selectedSource]);
 
   useEffect(() => {
     if (!selectedSourcePath) return;
@@ -293,18 +258,13 @@ export function KnowledgeAtlasPage() {
           </button>
         </div>
 
-        <div className="mt-3 rounded-lg border border-aegis-border bg-aegis-elevated p-3 text-[12px] text-aegis-text-dim space-y-1">
-          <div>Status: <span className="text-aegis-text">{statusText}</span></div>
-          <div>Embedding Atlas: <span className="text-aegis-text">{health?.has_embedding_atlas ? health.embedding_atlas_version || 'available' : 'missing'}</span></div>
-          <div>Sources: <span className="text-aegis-text">{health?.sources_count ?? 0}</span></div>
-          <div>Selected kind: <span className="text-aegis-text">{selectedSourceKind || '-'}</span></div>
-          <div>Selected size: <span className="text-aegis-text">{formatBytes(selectedSource?.size_bytes)}</span></div>
-          <div>Updated: <span className="text-aegis-text">{formatTimestamp(selectedSource?.modified_at_epoch)}</span></div>
-          <div>Atlas file: <span className="text-aegis-text">{lastBuild?.atlas_relative_path || '-'}</span></div>
-          {healthError && <div className="text-aegis-danger">Health error: {healthError}</div>}
-          {buildError && <div className="text-aegis-danger">Build error: {buildError}</div>}
-          {health?.embedding_atlas_error && <div className="text-aegis-danger">Dependency error: {health.embedding_atlas_error}</div>}
-        </div>
+        {(healthError || buildError || health?.embedding_atlas_error) && (
+          <div className="mt-3 rounded-lg border border-aegis-danger/40 bg-aegis-danger/10 p-2 text-[12px] text-aegis-danger space-y-1">
+            {healthError && <div>Health error: {healthError}</div>}
+            {buildError && <div>Build error: {buildError}</div>}
+            {health?.embedding_atlas_error && <div>Dependency error: {health.embedding_atlas_error}</div>}
+          </div>
+        )}
       </section>
 
       <section className="flex-1 min-h-0 rounded-xl border border-aegis-border bg-aegis-card p-2">

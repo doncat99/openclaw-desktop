@@ -566,7 +566,7 @@ export function SettingsPageFull() {
         <div className="flex items-center justify-between py-3 border-b border-aegis-border/10">
           <div>
             <div className="text-[13px] text-aegis-text font-medium">{t('settings.memoryExplorer', 'Memory Explorer')}</div>
-            <div className="text-[11px] text-aegis-text-dim/60 mt-0.5">{t('settings.memoryExplorerDesc', 'Browse and search memories via API server or local .md files')}</div>
+            <div className="text-[11px] text-aegis-text-dim/60 mt-0.5">{t('settings.memoryExplorerDesc', 'Browse and search memories via Gateway sessions, API server, or local .md files')}</div>
           </div>
           <Toggle
             enabled={memoryExplorerEnabled}
@@ -581,6 +581,17 @@ export function SettingsPageFull() {
             <div>
               <label className="text-[11px] text-aegis-text-dim block mb-1.5">{t('settings.memoryMode', 'Source')}</label>
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setMemoryMode('gateway')}
+                  className={clsx(
+                    'flex-1 py-1.5 rounded-lg text-[11px] font-medium border transition-all duration-150',
+                    memoryMode === 'gateway'
+                      ? 'bg-[rgb(var(--aegis-primary)/0.1)] border-[rgb(var(--aegis-primary)/0.25)] text-aegis-primary'
+                      : 'bg-transparent border-[rgb(var(--aegis-overlay)/0.08)] text-aegis-text-dim hover:border-[rgb(var(--aegis-overlay)/0.15)] hover:text-aegis-text-muted'
+                  )}
+                >
+                  🔗 {t('settings.memoryGateway', 'Gateway Sessions')}
+                </button>
                 <button
                   onClick={() => setMemoryMode('local')}
                   className={clsx(
@@ -604,6 +615,11 @@ export function SettingsPageFull() {
                   🔌 {t('settings.memoryApi', 'API Server')}
                 </button>
               </div>
+              {memoryMode === 'gateway' && (
+                <p className="text-[10px] text-aegis-text-dim/50 mt-1.5">
+                  {t('settings.memoryGatewayHint', 'Indexes persisted OpenClaw session history and context telemetry from Gateway.')}
+                </p>
+              )}
             </div>
 
             {/* Local Files Path */}

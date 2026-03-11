@@ -271,6 +271,216 @@ let slowTimer:  ReturnType<typeof setInterval> | null = null;
 // Reference to gateway (set by initPolling)
 let gw: any = null;
 
+function toNum(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function emptyTotals() {
+  return {
+    totalCost: 0,
+    inputCost: 0,
+    outputCost: 0,
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    requests: 0,
+    totalTokens: 0,
+    cacheReadCost: 0,
+    cacheWriteCost: 0,
+    missingCostEntries: 0,
+  };
+}
+
+function mergeTotals(target: any, source: any) {
+  const out = { ...target };
+  out.totalCost += toNum(source?.totalCost);
+  out.inputCost += toNum(source?.inputCost);
+  out.outputCost += toNum(source?.outputCost);
+  out.input += toNum(source?.input);
+  out.output += toNum(source?.output);
+  out.cacheRead += toNum(source?.cacheRead);
+  out.cacheWrite += toNum(source?.cacheWrite);
+  out.requests += toNum(source?.requests);
+  out.totalTokens += toNum(source?.totalTokens) || (toNum(source?.input) + toNum(source?.output) + toNum(source?.cacheRead) + toNum(source?.cacheWrite));
+  out.cacheReadCost += toNum(source?.cacheReadCost);
+  out.cacheWriteCost += toNum(source?.cacheWriteCost);
+  out.missingCostEntries += toNum(source?.missingCostEntries);
+  return out;
+}
+
+function normalizeDailyEntry(entry: any) {
+  return {
+    date: String(entry?.date || ''),
+    totalCost: toNum(entry?.totalCost ?? entry?.cost),
+    inputCost: toNum(entry?.inputCost),
+    outputCost: toNum(entry?.outputCost),
+    input: toNum(entry?.input),
+    output: toNum(entry?.output),
+    cacheRead: toNum(entry?.cacheRead),
+    cacheWrite: toNum(entry?.cacheWrite),
+    requests: toNum(entry?.requests),
+    totalTokens: toNum(entry?.totalTokens) || (toNum(entry?.input) + toNum(entry?.output) + toNum(entry?.cacheRead) + toNum(entry?.cacheWrite)),
+    cacheReadCost: toNum(entry?.cacheReadCost),
+    cacheWriteCost: toNum(entry?.cacheWriteCost),
+    missingCostEntries: toNum(entry?.missingCostEntries),
+  };
+}
+
+function normalizeCostSummary(summary: any, fallbackDays = 30): CostSummary | null {
+  if (!summary || typeof summary !== 'object') return null;
+  const dailyRaw = Array.isArray(summary.daily) ? summary.daily : [];
+  const daily = dailyRaw
+    .map(normalizeDailyEntry)
+    .filter((d) => d.date);
+  const totals = mergeTotals(emptyTotals(), summary.totals || {});
+  if (totals.totalTokens <= 0 && daily.length > 0) {
+    for (const row of daily) {
+      Object.assign(totals, mergeTotals(totals, row));
+    }
+  }
+  return {
+    days: Number.isFinite(Number(summary.days)) ? Number(summary.days) : fallbackDays,
+    daily,
+    totals,
+    updatedAt: Number(summary.updatedAt) || Date.now(),
+  };
+}
+
+function mergeCostSummaries(openClaw: any, ontoSynth: any, fallbackDays = 30): CostSummary | null {
+  const a = normalizeCostSummary(openClaw, fallbackDays);
+  const b = normalizeCostSummary(ontoSynth, fallbackDays);
+  if (!a && !b) return null;
+  if (!a) return b;
+  if (!b) return a;
+
+  const dailyMap = new Map<string, any>();
+  for (const row of a.daily) dailyMap.set(row.date, { ...row });
+  for (const row of b.daily) {
+    const current = dailyMap.get(row.date) || normalizeDailyEntry({ date: row.date });
+    dailyMap.set(row.date, mergeTotals(current, row));
+    dailyMap.get(row.date).date = row.date;
+  }
+  const mergedDaily = Array.from(dailyMap.values()).sort((x, y) => String(x.date).localeCompare(String(y.date)));
+  return {
+    days: Math.max(a.days || 0, b.days || 0, fallbackDays),
+    daily: mergedDaily,
+    totals: mergeTotals(a.totals || emptyTotals(), b.totals || {}),
+    updatedAt: Math.max(toNum(a.updatedAt), toNum(b.updatedAt), Date.now()),
+  };
+}
+
+function normalizeUsageResponse(response: any): any | null {
+  if (!response || typeof response !== 'object') return null;
+  const totals = mergeTotals(emptyTotals(), response.totals || {});
+  const aggregates = response.aggregates || {};
+  return {
+    updatedAt: Number(response.updatedAt) || Date.now(),
+    startDate: String(response.startDate || ''),
+    endDate: String(response.endDate || ''),
+    sessions: Array.isArray(response.sessions) ? response.sessions : [],
+    totals,
+    aggregates: {
+      messages: aggregates.messages || { total: 0, user: 0, assistant: 0, toolCalls: 0, toolResults: 0, errors: 0 },
+      tools: aggregates.tools || { totalCalls: 0, uniqueTools: 0, tools: [] },
+      byAgent: Array.isArray(aggregates.byAgent) ? aggregates.byAgent : [],
+      byModel: Array.isArray(aggregates.byModel) ? aggregates.byModel : [],
+      byProvider: Array.isArray(aggregates.byProvider) ? aggregates.byProvider : [],
+      byApplicationPhaseModel: Array.isArray(aggregates.byApplicationPhaseModel) ? aggregates.byApplicationPhaseModel : [],
+      daily: Array.isArray(aggregates.daily) ? aggregates.daily.map(normalizeDailyEntry).filter((d: any) => d.date) : [],
+    },
+  };
+}
+
+function mergeUsageBreakdowns(openClaw: any, ontoSynth: any): any | null {
+  const a = normalizeUsageResponse(openClaw);
+  const b = normalizeUsageResponse(ontoSynth);
+  if (!a && !b) return null;
+  if (!a) return b;
+  if (!b) return a;
+
+  const byAgentMap = new Map<string, any>();
+  for (const row of a.aggregates.byAgent || []) byAgentMap.set(String(row?.agentId || 'unknown'), { ...row, totals: mergeTotals(emptyTotals(), row?.totals || {}) });
+  for (const row of b.aggregates.byAgent || []) {
+    const key = String(row?.agentId || 'unknown');
+    const cur = byAgentMap.get(key) || { agentId: key, totals: emptyTotals() };
+    cur.totals = mergeTotals(cur.totals, row?.totals || {});
+    byAgentMap.set(key, cur);
+  }
+
+  const byModelMap = new Map<string, any>();
+  const addModel = (row: any) => {
+    const provider = String(row?.provider || '');
+    const model = String(row?.model || 'unknown');
+    const key = `${provider}::${model}`;
+    const cur = byModelMap.get(key) || { provider: provider || undefined, model, count: 0, totals: emptyTotals() };
+    cur.count += toNum(row?.count) || 1;
+    cur.totals = mergeTotals(cur.totals, row?.totals || {});
+    byModelMap.set(key, cur);
+  };
+  (a.aggregates.byModel || []).forEach(addModel);
+  (b.aggregates.byModel || []).forEach(addModel);
+
+  const byProviderMap = new Map<string, any>();
+  const addProvider = (row: any) => {
+    const provider = String(row?.provider || row?.model || 'unknown');
+    const cur = byProviderMap.get(provider) || { provider, model: provider, count: 0, totals: emptyTotals() };
+    cur.count += toNum(row?.count) || 1;
+    cur.totals = mergeTotals(cur.totals, row?.totals || {});
+    byProviderMap.set(provider, cur);
+  };
+  (a.aggregates.byProvider || []).forEach(addProvider);
+  (b.aggregates.byProvider || []).forEach(addProvider);
+
+  const dailyMap = new Map<string, any>();
+  const addDaily = (row: any) => {
+    const day = String(row?.date || '');
+    if (!day) return;
+    const cur = dailyMap.get(day) || normalizeDailyEntry({ date: day });
+    dailyMap.set(day, mergeTotals(cur, row));
+    dailyMap.get(day).date = day;
+  };
+  (a.aggregates.daily || []).forEach(addDaily);
+  (b.aggregates.daily || []).forEach(addDaily);
+
+  const messagesA = a.aggregates.messages || {};
+  const messagesB = b.aggregates.messages || {};
+  const toolsA = a.aggregates.tools || {};
+  const toolsB = b.aggregates.tools || {};
+
+  return {
+    updatedAt: Math.max(toNum(a.updatedAt), toNum(b.updatedAt), Date.now()),
+    startDate: a.startDate || b.startDate || '',
+    endDate: a.endDate || b.endDate || '',
+    sessions: [...(a.sessions || []), ...(b.sessions || [])],
+    totals: mergeTotals(a.totals || emptyTotals(), b.totals || {}),
+    aggregates: {
+      messages: {
+        total: toNum(messagesA.total) + toNum(messagesB.total),
+        user: toNum(messagesA.user) + toNum(messagesB.user),
+        assistant: toNum(messagesA.assistant) + toNum(messagesB.assistant),
+        toolCalls: toNum(messagesA.toolCalls) + toNum(messagesB.toolCalls),
+        toolResults: toNum(messagesA.toolResults) + toNum(messagesB.toolResults),
+        errors: toNum(messagesA.errors) + toNum(messagesB.errors),
+      },
+      tools: {
+        totalCalls: toNum(toolsA.totalCalls) + toNum(toolsB.totalCalls),
+        uniqueTools: Math.max(toNum(toolsA.uniqueTools), toNum(toolsB.uniqueTools)),
+        tools: [...(Array.isArray(toolsA.tools) ? toolsA.tools : []), ...(Array.isArray(toolsB.tools) ? toolsB.tools : [])],
+      },
+      byAgent: Array.from(byAgentMap.values()),
+      byModel: Array.from(byModelMap.values()),
+      byProvider: Array.from(byProviderMap.values()),
+      byApplicationPhaseModel: [
+        ...(Array.isArray(a.aggregates.byApplicationPhaseModel) ? a.aggregates.byApplicationPhaseModel : []),
+        ...(Array.isArray(b.aggregates.byApplicationPhaseModel) ? b.aggregates.byApplicationPhaseModel : []),
+      ],
+      daily: Array.from(dailyMap.values()).sort((x, y) => String(x.date).localeCompare(String(y.date))),
+    },
+  };
+}
+
 // ── Fetch functions ──────────────────────────────────────
 
 async function fetchSessions() {
@@ -304,8 +514,18 @@ async function fetchCost() {
   const store = useGatewayDataStore.getState();
   store.setLoading('cost', true);
   try {
-    const res = await gw.getCostSummary(30);
-    if (res) store.setCostSummary(res);
+    const [openClawResult, ontoSynthResult] = await Promise.allSettled([
+      gw.getCostSummary(30),
+      gw.getOntoSynthCostSummary(30),
+    ]);
+    const openClaw = openClawResult.status === 'fulfilled' ? openClawResult.value : null;
+    const ontoSynth = ontoSynthResult.status === 'fulfilled' ? ontoSynthResult.value : null;
+    const merged = mergeCostSummaries(openClaw, ontoSynth, 30);
+    if (merged) {
+      store.setCostSummary(merged);
+      return;
+    }
+    throw new Error('No cost data available from OpenClaw or OntoSynth');
   } catch (e: any) {
     store.setError('cost', e?.message || String(e));
     store.setLoading('cost', false);
@@ -316,8 +536,18 @@ async function fetchUsage() {
   const store = useGatewayDataStore.getState();
   store.setLoading('usage', true);
   try {
-    const res = await gw.getSessionsUsage({ limit: 100 });
-    if (res) store.setSessionsUsage(res);
+    const [openClawResult, ontoSynthResult] = await Promise.allSettled([
+      gw.getSessionsUsage({ limit: 100 }),
+      gw.getOntoSynthUsage({ days: 30 }),
+    ]);
+    const openClaw = openClawResult.status === 'fulfilled' ? openClawResult.value : null;
+    const ontoSynth = ontoSynthResult.status === 'fulfilled' ? ontoSynthResult.value : null;
+    const merged = mergeUsageBreakdowns(openClaw, ontoSynth);
+    if (merged) {
+      store.setSessionsUsage(merged);
+      return;
+    }
+    throw new Error('No usage data available from OpenClaw or OntoSynth');
   } catch (e: any) {
     store.setError('usage', e?.message || String(e));
     store.setLoading('usage', false);
@@ -420,11 +650,13 @@ export async function refreshGroup(group: 'sessions' | 'agents' | 'cost' | 'usag
  */
 export async function fetchFullCost(days = 365): Promise<CostSummary | null> {
   if (!gw) return null;
-  try {
-    return await gw.getCostSummary(days);
-  } catch {
-    return null;
-  }
+  const [openClawResult, ontoSynthResult] = await Promise.allSettled([
+    gw.getCostSummary(days),
+    gw.getOntoSynthCostSummary(days),
+  ]);
+  const openClaw = openClawResult.status === 'fulfilled' ? openClawResult.value : null;
+  const ontoSynth = ontoSynthResult.status === 'fulfilled' ? ontoSynthResult.value : null;
+  return mergeCostSummaries(openClaw, ontoSynth, days);
 }
 
 /**
@@ -434,11 +666,23 @@ export async function fetchFullUsage(
   params: { limit?: number; startDate?: string; endDate?: string; key?: string } = {}
 ): Promise<SessionsUsage | null> {
   if (!gw) return null;
-  try {
-    return await gw.getSessionsUsage(params);
-  } catch {
-    return null;
-  }
+  const daysFromRange = (() => {
+    const start = String(params.startDate || '').trim();
+    const end = String(params.endDate || '').trim();
+    if (!start || !end) return 365;
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    const diffMs = endDate.getTime() - startDate.getTime();
+    if (!Number.isFinite(diffMs) || diffMs < 0) return 365;
+    return Math.min(365, Math.max(1, Math.floor(diffMs / 86_400_000) + 1));
+  })();
+  const [openClawResult, ontoSynthResult] = await Promise.allSettled([
+    gw.getSessionsUsage(params),
+    gw.getOntoSynthUsage({ days: daysFromRange, startDate: params.startDate, endDate: params.endDate }),
+  ]);
+  const openClaw = openClawResult.status === 'fulfilled' ? openClawResult.value : null;
+  const ontoSynth = ontoSynthResult.status === 'fulfilled' ? ontoSynthResult.value : null;
+  return mergeUsageBreakdowns(openClaw, ontoSynth);
 }
 
 // ═══════════════════════════════════════════════════════════

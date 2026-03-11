@@ -20,7 +20,7 @@ interface SettingsState {
   budgetLimit: number;
   commandPaletteOpen: boolean;
   memoryExplorerEnabled: boolean;
-  memoryMode: 'api' | 'local';
+  memoryMode: 'api' | 'local' | 'gateway';
   memoryApiUrl: string;
   memoryLocalPath: string;
   context1mEnabled: boolean;
@@ -41,7 +41,7 @@ interface SettingsState {
   setBudgetLimit: (n: number) => void;
   setCommandPaletteOpen: (open: boolean) => void;
   setMemoryExplorerEnabled: (enabled: boolean) => void;
-  setMemoryMode: (mode: 'api' | 'local') => void;
+  setMemoryMode: (mode: 'api' | 'local' | 'gateway') => void;
   setMemoryApiUrl: (url: string) => void;
   setMemoryLocalPath: (path: string) => void;
   setContext1mEnabled: (enabled: boolean) => void;
@@ -72,7 +72,11 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   budgetLimit: parseFloat(localStorage.getItem('aegis-budget-limit') || '0') || 0,
   commandPaletteOpen: false,
   memoryExplorerEnabled: localStorage.getItem('aegis-memory-explorer') === 'true',
-  memoryMode: (localStorage.getItem('aegis-memory-mode') || 'local') as 'api' | 'local',
+  memoryMode: (() => {
+    const mode = localStorage.getItem('aegis-memory-mode');
+    if (mode === 'api' || mode === 'local' || mode === 'gateway') return mode;
+    return 'local';
+  })(),
   memoryApiUrl: localStorage.getItem('aegis-memory-api-url') || 'http://localhost:3040',
   memoryLocalPath: localStorage.getItem('aegis-memory-local-path') || '',
   context1mEnabled: localStorage.getItem('aegis-context1m') === 'true',

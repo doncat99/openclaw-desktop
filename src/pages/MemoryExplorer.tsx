@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Brain, Search, Loader2, Plus, Pencil, Trash2, RefreshCw, Settings, X } from 'lucide-react';
 import { PageTransition } from '@/components/shared/PageTransition';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { gateway } from '@/services/gateway';
 import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { dataColor } from '@/utils/theme-colors';
@@ -18,13 +19,17 @@ import { dataColor } from '@/utils/theme-colors';
 // ═══════════════════════════════════════════════════════════
 
 interface Memory {
-  id: number;
+  id: string | number;
   content: string;
   category: string;
   importance: number;
   tags: string[];
   created_at: string;
   similarity?: number;
+  source?: 'api' | 'local' | 'gateway';
+  sessionKey?: string;
+  role?: string;
+  model?: string;
 }
 
 interface GraphNode extends Memory {
@@ -34,6 +39,29 @@ interface GraphNode extends Memory {
 }
 
 type ViewMode = 'graph' | 'timeline' | 'cards';
+type MemorySourceMode = 'api' | 'local' | 'gateway';
+
+interface GatewaySessionLite {
+  key: string;
+  label: string;
+  model: string;
+  kind: string;
+  updatedAt: string;
+}
+
+interface GatewayDiagnostics {
+  connected: boolean;
+  totalSessions: number;
+  indexedSessions: number;
+  indexedMessages: number;
+  isolatedSessions: number;
+  usageErrors: number;
+  hookEnabled: boolean | null;
+  compactionMode: string;
+  contextPruningMode: string;
+  contextPruningTtlHours: number | null;
+  updatedAt: string;
+}
 
 // ═══════════════════════════════════════════════════════════
 // Constants
@@ -101,20 +129,22 @@ function groupByDate(memories: Memory[]): { date: string; label: string; items: 
 }
 
 /** Find connections between memories based on shared tags */
-function findConnections(memories: Memory[]): { from: number; to: number }[] {
-  const conns: { from: number; to: number }[] = [];
-  const count: Record<number, number> = {};
+function findConnections(memories: Memory[]): { from: string; to: string }[] {
+  const conns: { from: string; to: string }[] = [];
+  const count: Record<string, number> = {};
   const MAX_PER_NODE = 3;
 
   for (let i = 0; i < memories.length; i++) {
     for (let j = i + 1; j < memories.length; j++) {
       const a = memories[i], b = memories[j];
+      const aKey = String(a.id);
+      const bKey = String(b.id);
       if (!a.tags?.length || !b.tags?.length) continue;
       if (!a.tags.some(t => b.tags.includes(t))) continue;
-      if ((count[a.id] || 0) >= MAX_PER_NODE || (count[b.id] || 0) >= MAX_PER_NODE) continue;
-      conns.push({ from: a.id, to: b.id });
-      count[a.id] = (count[a.id] || 0) + 1;
-      count[b.id] = (count[b.id] || 0) + 1;
+      if ((count[aKey] || 0) >= MAX_PER_NODE || (count[bKey] || 0) >= MAX_PER_NODE) continue;
+      conns.push({ from: aKey, to: bKey });
+      count[aKey] = (count[aKey] || 0) + 1;
+      count[bKey] = (count[bKey] || 0) + 1;
     }
   }
   return conns;
@@ -136,6 +166,106 @@ function layoutNodes(memories: Memory[], w: number, h: number): GraphNode[] {
     const size = 22 + (imp / 10) * 30; // 22–52px
     return { ...mem, x, y, size };
   });
+}
+
+function toRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function messageContentToText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        const item = toRecord(part);
+        if (!item) return '';
+        const type = typeof item.type === 'string' ? item.type : '';
+        if (type === 'text' && typeof item.text === 'string') return item.text;
+        if (type === 'thinking' && typeof item.thinking === 'string') return item.thinking;
+        if (typeof item.text === 'string') return item.text;
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+  }
+  const record = toRecord(content);
+  if (!record) return '';
+  if (typeof record.text === 'string') return record.text;
+  return '';
+}
+
+function normalizeCategory(raw: string): string {
+  const value = (raw || '').trim().toLowerCase();
+  const known = new Set(CATEGORY_KEYS.map((item) => item.key));
+  if (known.has(value)) return value;
+  return 'general';
+}
+
+function inferCategory(content: string, sessionLabel: string): string {
+  const text = `${content}\n${sessionLabel}`.toLowerCase();
+  if (text.includes('project') || text.includes('workflow') || text.includes('pipeline')) return 'projects';
+  if (text.includes('decision') || text.includes('approve') || text.includes('reject')) return 'decisions';
+  if (text.includes('prefer') || text.includes('setting') || text.includes('option')) return 'preferences';
+  if (text.includes('agent') || text.includes('model') || text.includes('prompt') || text.includes('token')) return 'technical';
+  if (text.includes('team') || text.includes('hr') || text.includes('legal') || text.includes('coo')) return 'people';
+  if (text.includes('skill') || text.includes('assessment') || text.includes('learning')) return 'skills';
+  if (text.includes('schedule') || text.includes('cron') || text.includes('deadline')) return 'events';
+  return 'general';
+}
+
+function toIso(value: unknown, fallbackMs: number): string {
+  if (typeof value === 'number' && Number.isFinite(value)) return new Date(value).toISOString();
+  if (typeof value === 'string' && value.trim()) {
+    const ms = Date.parse(value);
+    if (Number.isFinite(ms)) return new Date(ms).toISOString();
+  }
+  return new Date(fallbackMs).toISOString();
+}
+
+function isIsolatedSessionKey(sessionKey: string): boolean {
+  return sessionKey.includes(':cron:') || sessionKey.includes(':subagent:');
+}
+
+function parseGatewaySessions(raw: unknown): GatewaySessionLite[] {
+  const payload = toRecord(raw);
+  const sessionsRaw = Array.isArray(payload?.sessions) ? payload.sessions : [];
+  return sessionsRaw
+    .map((entry) => {
+      const record = toRecord(entry);
+      if (!record) return null;
+      const key = typeof record.key === 'string' ? record.key : typeof record.sessionKey === 'string' ? record.sessionKey : '';
+      if (!key) return null;
+      const label = typeof record.label === 'string' && record.label.trim()
+        ? record.label.trim()
+        : typeof record.name === 'string' && record.name.trim()
+          ? record.name.trim()
+          : key;
+      const model = typeof record.model === 'string' ? record.model : '';
+      const kind = typeof record.kind === 'string' ? record.kind : '';
+      const updatedAt = toIso(
+        record.updatedAt ?? record.lastActive ?? record.lastMessageAt ?? record.lastUpdatedAt,
+        Date.now(),
+      );
+      return { key, label, model, kind, updatedAt };
+    })
+    .filter((item): item is GatewaySessionLite => Boolean(item))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+function safeNumber(value: unknown, fallback = 0): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return fallback;
+}
+
+function toBoolOrNull(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  return null;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -224,9 +354,16 @@ function MemoryDisabledView() {
           </div>
           <h2 className="text-[20px] font-bold text-aegis-text mb-3">{t('memoryExplorer.title')}</h2>
           <p className="text-[13px] text-aegis-text-dim/70 mb-6 leading-relaxed">
-            {t('memory.experimentalDesc', 'Browse, search, and manage your agent\'s memories. Connect to a Memory API server or point to your local workspace folder containing .md files.')}
+            {t('memory.experimentalDesc', 'Browse, search, and manage your agent memory. Source can be Gateway sessions, a Memory API server, or local workspace .md files.')}
           </p>
-          <div className="flex items-stretch gap-3 mb-6 max-w-md mx-auto">
+          <div className="flex items-stretch gap-3 mb-6 max-w-3xl mx-auto">
+            <div className="flex-1 p-4 rounded-xl border border-[rgb(var(--aegis-overlay)/0.08)] bg-[rgb(var(--aegis-overlay)/0.02)]">
+              <div className="text-[20px] mb-2">🔗</div>
+              <div className="text-[12px] font-semibold text-aegis-text mb-1">Gateway Sessions</div>
+              <div className="text-[11px] text-aegis-text-muted leading-relaxed">
+                Index persisted OpenClaw chat sessions and context telemetry
+              </div>
+            </div>
             <div className="flex-1 p-4 rounded-xl border border-[rgb(var(--aegis-overlay)/0.08)] bg-[rgb(var(--aegis-overlay)/0.02)]">
               <div className="text-[20px] mb-2">📁</div>
               <div className="text-[12px] font-semibold text-aegis-text mb-1">{t('memory.localOption', 'Local Files')}</div>
@@ -276,8 +413,8 @@ function GraphView({ memories, onSelect }: { memories: Memory[]; onSelect: (m: M
   const nodes = useMemo(() => layoutNodes(memories, dims.w, dims.h), [memories, dims]);
   const connections = useMemo(() => findConnections(memories), [memories]);
   const nodeMap = useMemo(() => {
-    const m: Record<number, GraphNode> = {};
-    nodes.forEach(n => { m[n.id] = n; });
+    const m: Record<string, GraphNode> = {};
+    nodes.forEach(n => { m[String(n.id)] = n; });
     return m;
   }, [nodes]);
 
@@ -553,13 +690,13 @@ function CardsView({ memories, onSelect }: { memories: Memory[]; onSelect: (m: M
 // Detail Panel — Slide-in from end
 // ═══════════════════════════════════════════════════════════
 
-function DetailPanel({ memory, onClose, onEdit, onDelete, apiUrl, isLocal }: {
+function DetailPanel({ memory, onClose, onEdit, onDelete, apiUrl, isReadOnly }: {
   memory: Memory | null;
   onClose: () => void;
   onEdit: (m: Memory) => void;
-  onDelete: (id: number) => void;
+  onDelete: (id: string | number) => void;
   apiUrl: string;
-  isLocal: boolean;
+  isReadOnly: boolean;
 }) {
   const { t } = useTranslation();
   const [related, setRelated] = useState<Memory[]>([]);
@@ -567,12 +704,12 @@ function DetailPanel({ memory, onClose, onEdit, onDelete, apiUrl, isLocal }: {
 
   // Fetch related memories
   useEffect(() => {
-    if (!memory || isLocal) { setRelated([]); return; }
+    if (!memory || isReadOnly) { setRelated([]); return; }
     fetch(`${apiUrl}/related/${memory.id}?limit=5`)
       .then(r => r.json())
       .then(data => setRelated(Array.isArray(data) ? data : data.memories || data.results || []))
       .catch(() => setRelated([]));
-  }, [memory, apiUrl, isLocal]);
+  }, [memory, apiUrl, isReadOnly]);
 
   useEffect(() => { setConfirmDel(false); }, [memory]);
 
@@ -613,7 +750,7 @@ function DetailPanel({ memory, onClose, onEdit, onDelete, apiUrl, isLocal }: {
               </div>
 
               {/* Actions */}
-              {!isLocal && (
+              {!isReadOnly && (
                 <div className="flex items-center gap-2 mb-4">
                   <button onClick={() => onEdit(memory)}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[rgb(var(--aegis-overlay)/0.04)] border border-[rgb(var(--aegis-overlay)/0.08)] text-[11px] text-aegis-text-muted hover:text-aegis-primary hover:border-aegis-primary/30 transition-colors">
@@ -693,7 +830,11 @@ export function MemoryExplorerPage() {
 
   const { t } = useTranslation();
   const API = memoryApiUrl || 'http://localhost:3040';
-  const isLocal = memoryMode === 'local';
+  const mode = memoryMode as MemorySourceMode;
+  const isLocal = mode === 'local';
+  const isApi = mode === 'api';
+  const isGateway = mode === 'gateway';
+  const isReadOnly = !isApi;
 
   // ── State ──
   const [memories, setMemories] = useState<Memory[]>([]);
@@ -705,6 +846,8 @@ export function MemoryExplorerPage() {
   const [selectedMemory, setSelectedMemory] = useState<Memory | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingMemory, setEditingMemory] = useState<Memory | null>(null);
+  const [loadError, setLoadError] = useState('');
+  const [gatewayDiagnostics, setGatewayDiagnostics] = useState<GatewayDiagnostics | null>(null);
 
   // ── Parse local file ──
   const parseLocalFile = (file: { name: string; content: string; modified: string; size: number }, idx: number): Memory => {
@@ -725,12 +868,130 @@ export function MemoryExplorerPage() {
       importance: file.name === 'MEMORY.md' ? 10 : 5,
       tags: tags.length ? tags : [file.name.replace('.md', '')],
       created_at: file.modified,
+      source: 'local',
     };
   };
+
+  // ── Load from Gateway sessions (session-memory view) ──
+  const loadGatewayMemories = useCallback(async (searchText = '') => {
+    const status = gateway.getStatus();
+    if (!status.connected) throw new Error('Gateway is not connected.');
+
+    const [sessionsRes, usageRes, configRes] = await Promise.all([
+      gateway.getSessions(),
+      gateway.getSessionsUsage({ limit: 200 }),
+      gateway.call('config.get', {}),
+    ]);
+
+    const sessions = parseGatewaySessions(sessionsRes);
+    const nonIsolated = sessions.filter((s) => !isIsolatedSessionKey(s.key));
+    const selectedSessions = (nonIsolated.length > 0 ? nonIsolated : sessions).slice(0, 16);
+    const queryNorm = searchText.trim().toLowerCase();
+    const now = Date.now();
+
+    const historyBatches = await Promise.all(
+      selectedSessions.map(async (session) => {
+        try {
+          const history = await gateway.getHistory(session.key, 120);
+          const payload = toRecord(history);
+          const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+          return { session, messages };
+        } catch {
+          return { session, messages: [] as unknown[] };
+        }
+      }),
+    );
+
+    let indexedMessages = 0;
+    const out: Memory[] = [];
+    historyBatches.forEach((batch, sessionIdx) => {
+      const session = batch.session;
+      batch.messages.forEach((message, msgIdx) => {
+        const msg = toRecord(message);
+        if (!msg) return;
+        const role = typeof msg.role === 'string' ? msg.role : 'assistant';
+        if (role === 'system') return;
+
+        const content = messageContentToText(msg.content);
+        if (!content.trim()) return;
+        const haystack = `${content}\n${session.key}\n${session.label}\n${session.model}`.toLowerCase();
+        if (queryNorm && !haystack.includes(queryNorm)) return;
+
+        const idPart = String(msg.id ?? msg.messageId ?? `${sessionIdx}-${msgIdx}`);
+        const createdAt = toIso(
+          msg.timestamp ?? msg.createdAt ?? msg.ts ?? session.updatedAt,
+          now - (sessionIdx * 1000 + msgIdx * 100),
+        );
+        const category = normalizeCategory(inferCategory(content, session.label));
+        const baseImportance = role === 'assistant' ? 7 : role === 'user' ? 6 : 5;
+        const boost = content.length > 700 ? 1 : 0;
+        const importance = Math.max(1, Math.min(10, baseImportance + boost));
+
+        indexedMessages += 1;
+        out.push({
+          id: `${session.key}:${idPart}`,
+          content,
+          category,
+          importance,
+          tags: [
+            session.kind || 'session',
+            role,
+            session.model ? session.model.split('/').pop() || session.model : '',
+            isIsolatedSessionKey(session.key) ? 'isolated' : 'mainline',
+          ].filter(Boolean),
+          created_at: createdAt,
+          source: 'gateway',
+          sessionKey: session.key,
+          role,
+          model: session.model,
+        });
+      });
+    });
+
+    out.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    setMemories(out);
+
+    const usage = toRecord(usageRes);
+    const usageErrors = Array.isArray(usage?.errors)
+      ? usage.errors.length
+      : safeNumber(usage?.errorCount ?? usage?.errors_count, 0);
+
+    const cfgPayload = toRecord(configRes);
+    const cfg = toRecord(cfgPayload?.config) || cfgPayload;
+    const hooks = toRecord(cfg?.hooks);
+    const internal = toRecord(hooks?.internal);
+    const entries = toRecord(internal?.entries);
+    const sessionMemory = toRecord(entries?.['session-memory']);
+    const hookEnabled = toBoolOrNull(sessionMemory?.enabled);
+
+    const agents = toRecord(cfg?.agents);
+    const defaults = toRecord(agents?.defaults);
+    const compaction = toRecord(defaults?.compaction);
+    const pruning = toRecord(defaults?.contextPruning);
+    const compactionMode = typeof compaction?.mode === 'string' ? compaction.mode : 'default';
+    const contextPruningMode = typeof pruning?.mode === 'string' ? pruning.mode : 'default';
+    const ttlMs = safeNumber(pruning?.ttlMs ?? pruning?.ttl_ms, 0);
+    const contextPruningTtlHours = ttlMs > 0 ? Math.round((ttlMs / 3_600_000) * 10) / 10 : null;
+
+    setGatewayDiagnostics({
+      connected: status.connected,
+      totalSessions: sessions.length,
+      indexedSessions: selectedSessions.length,
+      indexedMessages,
+      isolatedSessions: sessions.filter((s) => isIsolatedSessionKey(s.key)).length,
+      usageErrors,
+      hookEnabled,
+      compactionMode,
+      contextPruningMode,
+      contextPruningTtlHours,
+      updatedAt: new Date().toISOString(),
+    });
+  }, []);
 
   // ── Load ──
   const loadMemories = useCallback(async () => {
     setLoading(true);
+    setLoadError('');
     try {
       if (isLocal) {
         if (!memoryLocalPath) { setMemories([]); setLoading(false); return; }
@@ -738,14 +999,23 @@ export function MemoryExplorerPage() {
         if (result?.success && result.files) {
           setMemories(result.files.map(parseLocalFile));
         } else { setMemories([]); }
+        setGatewayDiagnostics(null);
+      } else if (isGateway) {
+        await loadGatewayMemories('');
       } else {
         const res = await fetch(`${API}/memories?limit=200`);
         const data = await res.json();
         setMemories(Array.isArray(data) ? data : data.memories || data.results || []);
+        setGatewayDiagnostics(null);
       }
-    } catch { setMemories([]); }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err || 'Failed to load memories');
+      setLoadError(msg);
+      setMemories([]);
+      if (isGateway) setGatewayDiagnostics(null);
+    }
     finally { setLoading(false); }
-  }, [isLocal, memoryLocalPath, API]);
+  }, [isLocal, isGateway, memoryLocalPath, API, loadGatewayMemories]);
 
   useEffect(() => { loadMemories(); }, [loadMemories]);
 
@@ -753,6 +1023,7 @@ export function MemoryExplorerPage() {
   const handleSearch = useCallback(async () => {
     if (!query.trim()) { loadMemories(); return; }
     setSearching(true);
+    setLoadError('');
     try {
       if (isLocal) {
         if (!memoryLocalPath) { setSearching(false); return; }
@@ -763,17 +1034,24 @@ export function MemoryExplorerPage() {
             .filter((f: any) => f.content.toLowerCase().includes(q) || f.name.toLowerCase().includes(q))
             .map(parseLocalFile));
         }
+      } else if (isGateway) {
+        await loadGatewayMemories(query);
       } else {
         const res = await fetch(`${API}/search?q=${encodeURIComponent(query)}&limit=50`);
         const data = await res.json();
         setMemories(data.memories || data.results || []);
       }
-    } catch { /* silent */ }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err || 'Search failed');
+      setLoadError(msg);
+      if (isGateway) setGatewayDiagnostics(null);
+    }
     finally { setSearching(false); }
-  }, [query, loadMemories, isLocal, memoryLocalPath, API]);
+  }, [query, loadMemories, isLocal, isGateway, memoryLocalPath, API, loadGatewayMemories]);
 
   // ── CRUD ──
   const handleSave = async (data: { content: string; category: string; importance: number; tags: string[] }) => {
+    if (!isApi) return;
     try {
       if (editingMemory) {
         await fetch(`${API}/memories/${editingMemory.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
@@ -784,7 +1062,8 @@ export function MemoryExplorerPage() {
     } catch { /* silent */ }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string | number) => {
+    if (!isApi) return;
     try {
       await fetch(`${API}/memories/${id}`, { method: 'DELETE' });
       setMemories(prev => prev.filter(m => m.id !== id));
@@ -829,7 +1108,7 @@ export function MemoryExplorerPage() {
               value={query}
               onChange={e => setQuery(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleSearch()}
-              placeholder="Search memories..."
+              placeholder={isGateway ? 'Search session memories...' : 'Search memories...'}
               dir="auto"
               className="w-full bg-[rgb(var(--aegis-overlay)/0.04)] border border-[rgb(var(--aegis-overlay)/0.08)] rounded-xl ps-9 pe-3 py-2.5 text-[13px] text-aegis-text placeholder:text-aegis-text-dim focus:outline-none focus:border-aegis-accent/40 transition-colors"
             />
@@ -838,6 +1117,11 @@ export function MemoryExplorerPage() {
           <div className="text-[9px] text-aegis-text-dim mt-1.5 ps-1">
             <kbd className="px-1 py-px rounded border border-[rgb(var(--aegis-overlay)/0.1)] bg-[rgb(var(--aegis-overlay)/0.04)] text-[8px] font-mono">Enter</kbd> to search
           </div>
+          {loadError && (
+            <div className="mt-2 text-[10px] px-2 py-1.5 rounded-lg border border-red-400/30 bg-red-500/10 text-red-300">
+              {loadError}
+            </div>
+          )}
         </div>
 
         {/* Categories */}
@@ -865,7 +1149,7 @@ export function MemoryExplorerPage() {
 
         {/* Stats */}
         <div className="p-4 border-b border-[rgb(var(--aegis-overlay)/0.06)]">
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2 mb-2">
             {[
               { value: memories.length, label: 'Memories' },
               { value: memories.reduce((s, m) => s + (m.tags?.length || 0), 0), label: 'Tags' },
@@ -879,6 +1163,23 @@ export function MemoryExplorerPage() {
               </div>
             ))}
           </div>
+          <div className="text-[10px] text-aegis-text-dim">
+            Source: <span className="text-aegis-text">{isGateway ? 'Gateway Sessions' : isApi ? 'Memory API' : 'Local Files'}</span>
+          </div>
+          {isGateway && gatewayDiagnostics && (
+            <div className="mt-2 rounded-lg border border-[rgb(var(--aegis-overlay)/0.08)] bg-[rgb(var(--aegis-overlay)/0.02)] p-2.5 space-y-1.5">
+              <div className="text-[10px] font-semibold text-aegis-text">Session Memory Telemetry</div>
+              <div className="text-[9px] text-aegis-text-dim">Sessions indexed: {gatewayDiagnostics.indexedSessions}/{gatewayDiagnostics.totalSessions}</div>
+              <div className="text-[9px] text-aegis-text-dim">Messages indexed: {gatewayDiagnostics.indexedMessages}</div>
+              <div className="text-[9px] text-aegis-text-dim">Isolated sessions: {gatewayDiagnostics.isolatedSessions}</div>
+              <div className="text-[9px] text-aegis-text-dim">session-memory hook: {gatewayDiagnostics.hookEnabled == null ? 'unknown' : gatewayDiagnostics.hookEnabled ? 'enabled' : 'disabled'}</div>
+              <div className="text-[9px] text-aegis-text-dim">Compaction: {gatewayDiagnostics.compactionMode}</div>
+              <div className="text-[9px] text-aegis-text-dim">Pruning: {gatewayDiagnostics.contextPruningMode}{gatewayDiagnostics.contextPruningTtlHours != null ? ` · TTL ${gatewayDiagnostics.contextPruningTtlHours}h` : ''}</div>
+              {gatewayDiagnostics.usageErrors > 0 && (
+                <div className="text-[9px] text-amber-300">Usage errors: {gatewayDiagnostics.usageErrors}</div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Recent Activity */}
@@ -891,7 +1192,10 @@ export function MemoryExplorerPage() {
                 <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: getCatColor(mem.category) }} />
                 <div className="min-w-0">
                   <div className="text-[11px] text-aegis-text-muted truncate">{extractTitle(mem)}</div>
-                  <div className="text-[9px] text-aegis-text-dim">{mem.created_at ? timeAgoShort(mem.created_at) : ''} · {mem.category}</div>
+                  <div className="text-[9px] text-aegis-text-dim">
+                    {mem.created_at ? timeAgoShort(mem.created_at) : ''} · {mem.category}
+                    {mem.role ? ` · ${mem.role}` : ''}
+                  </div>
                 </div>
               </div>
             ))}
@@ -907,10 +1211,13 @@ export function MemoryExplorerPage() {
           <div className="flex items-center gap-3">
             <span className="text-[16px] font-bold text-aegis-text">🧠 {t('memoryExplorer.title')}</span>
             {filtered.length > 0 && <span className="text-[11px] text-aegis-text-dim">{filtered.length} results</span>}
+            <span className="text-[10px] px-2 py-0.5 rounded-full border border-[rgb(var(--aegis-overlay)/0.1)] text-aegis-text-dim">
+              {isGateway ? 'Gateway' : isApi ? 'API' : 'Local'}
+            </span>
           </div>
           <div className="flex items-center gap-2">
             {/* Add button */}
-            {!isLocal && (
+            {isApi && (
               <button onClick={() => { setEditingMemory(null); setModalOpen(true); }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-aegis-primary text-aegis-btn-primary-text text-[11px] font-semibold hover:bg-aegis-primary/80 transition-colors">
                 <Plus size={14} /> Add
@@ -959,7 +1266,7 @@ export function MemoryExplorerPage() {
         onEdit={handleEdit}
         onDelete={handleDelete}
         apiUrl={API}
-        isLocal={isLocal}
+        isReadOnly={isReadOnly}
       />
 
       {/* ═══ CRUD Modal ═══ */}

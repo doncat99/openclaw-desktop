@@ -143,6 +143,52 @@ type PipelinePhase = {
 };
 
 type JsonObject = Record<string, unknown>;
+type SettingsEditorMode = 'form' | 'json';
+type SettingsFormFieldKind = 'number' | 'boolean' | 'string' | 'nullable_string' | 'select';
+type SettingsFormField = {
+  key: string;
+  label: string;
+  kind: SettingsFormFieldKind;
+  description?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  placeholder?: string;
+  options?: ReadonlyArray<{ value: string; label: string }>;
+};
+type ScalarSettingValue = string | number | boolean | null;
+type StructureChapterOption = {
+  chapterId: string;
+  structurePath: string;
+  miningPath: string;
+};
+type MindmapNodeDraft = {
+  id: string;
+  label: string;
+  parent_id: string | null;
+  depth: number;
+  kind: string;
+  node_type: string;
+  description: string | null;
+  ku_ids: string[];
+  note: string | null;
+  icon: string | null;
+  visual_meta: JsonObject | null;
+  meta: JsonObject;
+  children: MindmapNodeDraft[];
+};
+type MindmapDraft = {
+  root: MindmapNodeDraft;
+  logic: string;
+  markdown: string | null;
+};
+type FlattenedMindmapNode = {
+  id: string;
+  label: string;
+  depth: number;
+  parentId: string | null;
+};
+type AssessmentDraftItem = Record<string, unknown>;
 
 const SAMPLE_FLOW_JSON = `{
   "title": "Course Creation Workflow",
@@ -181,7 +227,7 @@ const SAMPLE_FLOW_JSON = `{
     }
   ]
 }`;
-const CREATION_FLOW_STORAGE_KEY = 'ontosynth-creation-flow-json-v1';
+const CREATION_FLOW_STORAGE_KEY = 'ontosynth-creation-flow-json-v2';
 const CREATION_APP_STORAGE_KEY = 'ontosynth-creation-selected-app-v1';
 const LEGACY_FLOW_STORAGE_KEY = 'ontosynth-stepper-flow-json-v1';
 const NO_SELECTION_APP_ID = '__none__';
@@ -205,6 +251,45 @@ const PIPELINE_PHASE_TEMPLATES: ReadonlyArray<{ id: string; title: string; patte
   { id: '09_video', title: 'Video', patterns: [/video/i, /phase\s*9/i] },
   { id: '10_learning', title: 'Learning Intelligence', patterns: [/learning/i, /intelligence/i, /phase\s*10/i] },
 ];
+const REQUIRED_WORKFLOW_PHASE_IDS = ['02_structure', '05_mindmap', '06_assessment', '07_slide'] as const;
+const WORKFLOW_STEP_COPY: Record<string, { title: string; content: string; bullets: string[] }> = {
+  '02_structure': {
+    title: 'Structure Refinement',
+    content: 'Refine chapter boundaries, section titles, page spans, and section content before downstream generation.',
+    bullets: [
+      'Correct missed or merged sections in chapter structure.',
+      'Fix chapter and section page ranges.',
+      'Refine section content in chapter mining before mindmap and slide generation.',
+    ],
+  },
+  '05_mindmap': {
+    title: 'Mindmap Authoring',
+    content: 'Curate the concept map, adjust node hierarchy, and attach supporting visuals that should survive downstream regeneration.',
+    bullets: [
+      'Rename, add, or remove nodes to improve learning flow.',
+      'Attach or replace node visuals where the map needs stronger explanation.',
+      'Check chapter-level and section-level scopes before approving.',
+    ],
+  },
+  '06_assessment': {
+    title: 'Assessment Curation',
+    content: 'Review generated questions, correct weak wording, and verify answer keys and explanations before publication.',
+    bullets: [
+      'Filter and inspect generated question banks by chapter.',
+      'Edit stems, options, answers, and rationales.',
+      'Keep question coverage aligned with the refined structure and mindmap.',
+    ],
+  },
+  '07_slide': {
+    title: 'Slide Prompt Tuning',
+    content: 'Tune slide generation inputs and review design prompts before running targeted slide regeneration.',
+    bullets: [
+      'Edit slide visual prompts and layout templates.',
+      'Use thumbnails and key files to verify slide direction.',
+      'Prepare precise inputs for targeted regenerate runs.',
+    ],
+  },
+};
 
 const DEFAULT_GLOBAL_TASK_PARAMS: JsonObject = {
   chapter_parallelism: 2,
@@ -282,6 +367,141 @@ const DEFAULT_PHASE_SETTINGS: Record<string, JsonObject> = {
   },
 };
 
+const GLOBAL_TASK_PARAM_FIELDS: ReadonlyArray<SettingsFormField> = [
+  {
+    key: 'chapter_parallelism',
+    label: 'Chapter Parallelism',
+    kind: 'number',
+    min: 1,
+    max: 16,
+    description: 'How many chapters OntoSynth can process at the same time.',
+  },
+  {
+    key: 'section_parallelism',
+    label: 'Section Parallelism',
+    kind: 'number',
+    min: 1,
+    max: 32,
+    description: 'Fan-out inside each chapter for section-level work.',
+  },
+  {
+    key: 'expert_parallelism',
+    label: 'Expert Parallelism',
+    kind: 'number',
+    min: 1,
+    max: 16,
+    description: 'Concurrent expert passes when a phase supports them.',
+  },
+  {
+    key: 'render_parallelism',
+    label: 'Render Parallelism',
+    kind: 'number',
+    min: 1,
+    max: 32,
+    description: 'Parallel slide and image rendering workers.',
+  },
+];
+
+const GLOBAL_TASK_PARAM_PRESETS: ReadonlyArray<{
+  id: string;
+  label: string;
+  description: string;
+  values: JsonObject;
+}> = [
+  {
+    id: 'safe',
+    label: 'Safe',
+    description: 'Low system pressure.',
+    values: {
+      chapter_parallelism: 1,
+      section_parallelism: 2,
+      expert_parallelism: 2,
+      render_parallelism: 2,
+    },
+  },
+  {
+    id: 'balanced',
+    label: 'Balanced',
+    description: 'Recommended default.',
+    values: DEFAULT_GLOBAL_TASK_PARAMS,
+  },
+  {
+    id: 'fast',
+    label: 'Fast',
+    description: 'Higher CPU and memory usage.',
+    values: {
+      chapter_parallelism: 3,
+      section_parallelism: 6,
+      expert_parallelism: 4,
+      render_parallelism: 8,
+    },
+  },
+];
+
+const PHASE_SETTINGS_FIELDS_BY_ID: Partial<Record<string, ReadonlyArray<SettingsFormField>>> = {
+  '01_ingestion': [
+    {
+      key: 'preferred_engine',
+      label: 'Preferred Engine',
+      kind: 'select',
+      description: 'Primary parsing engine for the source documents.',
+      options: [
+        { value: 'docling', label: 'Docling' },
+        { value: 'docling_v2', label: 'Docling v2' },
+        { value: 'mineru', label: 'MinerU' },
+      ],
+    },
+    {
+      key: 'ocr_enabled',
+      label: 'OCR Enabled',
+      kind: 'boolean',
+      description: 'Use OCR when the parser needs to read scanned pages.',
+    },
+    {
+      key: 'config_path',
+      label: 'Config Path',
+      kind: 'nullable_string',
+      placeholder: '/absolute/path/to/config.yaml',
+      description: 'Optional config file for the ingestion engine.',
+    },
+  ],
+  '05_mindmap': [
+    {
+      key: 'generate_focus',
+      label: 'Generate Focus',
+      kind: 'select',
+      description: 'Choose whether to generate at chapter or section level.',
+      options: [
+        { value: 'chapter', label: 'Chapter' },
+        { value: 'section', label: 'Section' },
+      ],
+    },
+  ],
+  '07_slide': [
+    {
+      key: 'generate_focus',
+      label: 'Generate Focus',
+      kind: 'select',
+      description: 'Choose whether slide generation runs by chapter or section.',
+      options: [
+        { value: 'chapter', label: 'Chapter' },
+        { value: 'section', label: 'Section' },
+      ],
+    },
+    {
+      key: 'layout_preset',
+      label: 'Layout Preset',
+      kind: 'select',
+      description: 'Layout style for the slide renderer.',
+      options: [
+        { value: 'Preset', label: 'Preset' },
+        { value: 'Standard', label: 'Standard' },
+        { value: 'Enhance', label: 'Enhance' },
+      ],
+    },
+  ],
+};
+
 function flowStorageKey(applicationId: string): string {
   return `${CREATION_FLOW_STORAGE_KEY}:${applicationId || NO_SELECTION_APP_ID}`;
 }
@@ -326,7 +546,8 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-function pickString(record: Record<string, unknown>, keys: string[]): string {
+function pickString(record: Record<string, unknown> | null | undefined, keys: string[]): string {
+  if (!record) return '';
   for (const key of keys) {
     const value = record[key];
     if (typeof value === 'string' && value.trim()) return value.trim();
@@ -334,7 +555,8 @@ function pickString(record: Record<string, unknown>, keys: string[]): string {
   return '';
 }
 
-function pickBoolean(record: Record<string, unknown>, keys: string[], fallback = false): boolean {
+function pickBoolean(record: Record<string, unknown> | null | undefined, keys: string[], fallback = false): boolean {
+  if (!record) return fallback;
   for (const key of keys) {
     const value = record[key];
     if (typeof value === 'boolean') return value;
@@ -489,20 +711,24 @@ function formatPhaseStatus(status: PipelinePhaseStatus): string {
 }
 
 function flowFromPhases(applicationName: string, phases: CreationPhase[]): FlowDefinition {
-  const steps: FlowStep[] = phases
-    .filter((phase) => phase.enabledByPipeline || phase.present)
-    .map((phase, index) => ({
-      id: phase.id,
-      title: `Step ${index + 1} · ${phase.title}`,
-      content: `${phase.title} phase for ${applicationName}. Review generated artifacts and confirm before continuing.`,
-      bullets: [
-        phase.present ? 'Existing outputs detected' : 'Outputs not generated yet',
-        phase.interactive ? 'Human review recommended' : 'System-run phase',
-        phase.supportsRegenerate ? 'Regeneration API available' : 'Regeneration API not enabled',
+  const titleById = new Map(PIPELINE_PHASE_TEMPLATES.map((phase) => [phase.id, phase.title]));
+  for (const phase of phases) titleById.set(phase.id, phase.title);
+  const steps: FlowStep[] = REQUIRED_WORKFLOW_PHASE_IDS.map((phaseId, index) => {
+    const phase = phases.find((item) => item.id === phaseId) || null;
+    const copy = WORKFLOW_STEP_COPY[phaseId];
+    const phaseTitle = titleById.get(phaseId) || phaseId;
+    return {
+      id: phaseId,
+      title: `Step ${index + 1} · ${copy?.title || phaseTitle}`,
+      content: copy?.content || `${phaseTitle} for ${applicationName}.`,
+      bullets: copy?.bullets || [
+        phase?.present ? 'Existing outputs detected' : 'Outputs not generated yet',
+        phase?.supportsRegenerate ? 'Regeneration API available' : 'Regeneration API not enabled',
       ],
       requireConfirm: false,
       confirmText: '',
-    }));
+    };
+  });
 
   if (steps.length === 0) {
     return {
@@ -648,45 +874,20 @@ function isStepRunActive(status: string): boolean {
   return value === 'running' || value === 'busy' || value === 'ok';
 }
 
-function findNestedStringByKey(value: unknown, keys: Set<string>, depth = 0): string {
-  if (depth > 8 || value == null) return '';
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findNestedStringByKey(item, keys, depth + 1);
-      if (found) return found;
-    }
-    return '';
-  }
-  if (typeof value !== 'object') return '';
-  const record = value as Record<string, unknown>;
-  for (const [key, item] of Object.entries(record)) {
-    if (keys.has(key.toLowerCase())) {
-      const str = nonEmptyString(item);
-      if (str) return str;
-    }
-    const nested = findNestedStringByKey(item, keys, depth + 1);
-    if (nested) return nested;
-  }
-  return '';
-}
-
-function parseSlideIdentifiersFromJson(content: string): {
-  docId: string;
+function parseSlideIdentifiersFromPath(relativePath: string): {
   chapterId: string;
   sectionId: string;
   slideId: string;
 } {
-  try {
-    const parsed = JSON.parse(content);
-    return {
-      docId: findNestedStringByKey(parsed, new Set(['doc_id', 'docid', 'document_id', 'documentid'])),
-      chapterId: findNestedStringByKey(parsed, new Set(['chapter_id', 'chapterid'])),
-      sectionId: findNestedStringByKey(parsed, new Set(['section_id', 'sectionid'])),
-      slideId: findNestedStringByKey(parsed, new Set(['slide_id', 'slideid'])),
-    };
-  } catch {
-    return { docId: '', chapterId: '', sectionId: '', slideId: '' };
-  }
+  const normalized = String(relativePath || '').replace(/\\/g, '/');
+  const chapterId = normalized.match(/\/(CH-[^/]+)\//i)?.[1] || '';
+  const sectionId = normalized.match(/\/(SEC-[^/]+)\//i)?.[1] || '';
+  const slideId = fileStem(normalized).toUpperCase();
+  return {
+    chapterId,
+    sectionId,
+    slideId: /^S\d+$/i.test(slideId) ? slideId : '',
+  };
 }
 
 function safeParseJsonRecord(raw: string): Record<string, unknown> | null {
@@ -696,6 +897,254 @@ function safeParseJsonRecord(raw: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function safeParseJsonArray(raw: string): unknown[] | null {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function joinRelativeArtifactPath(basePath: string, siblingPath: string): string {
+  const normalizedBase = String(basePath || '').replace(/\\/g, '/');
+  const normalizedSibling = String(siblingPath || '').replace(/\\/g, '/');
+  if (!normalizedBase || !normalizedSibling) return '';
+  if (normalizedSibling.startsWith('/')) return normalizedSibling.replace(/^\/+/, '');
+  const parts = normalizedBase.split('/').filter(Boolean);
+  parts.pop();
+  for (const part of normalizedSibling.split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      parts.pop();
+      continue;
+    }
+    parts.push(part);
+  }
+  return parts.join('/');
+}
+
+function isExternalImageUri(uri: string): boolean {
+  return /^https?:\/\//i.test(uri) || /^data:image\//i.test(uri);
+}
+
+function resolveStructureImageCandidatePaths(miningPath: string, rawUri: string): string[] {
+  const uri = String(rawUri || '').trim().replace(/\\/g, '/');
+  const normalizedMiningPath = String(miningPath || '').replace(/\\/g, '/');
+  if (!uri || !normalizedMiningPath || isExternalImageUri(uri)) return [];
+  const appRoot = normalizedMiningPath.replace(/\/02_structure\/.*$/i, '');
+  const fileName = fileNameFromPath(uri);
+  const candidates = new Set<string>();
+  const siblingPath = joinRelativeArtifactPath(normalizedMiningPath, uri);
+  if (siblingPath) candidates.add(siblingPath);
+  if (appRoot) {
+    candidates.add(`${appRoot}/${uri.replace(/^\/+/, '')}`);
+    if (!/^01_ingestion\//i.test(uri)) {
+      candidates.add(`${appRoot}/01_ingestion/${uri.replace(/^\/+/, '')}`);
+    }
+    if (fileName) {
+      candidates.add(`${appRoot}/01_ingestion/artifacts/${fileName}`);
+    }
+  }
+  return Array.from(candidates).map((item) => item.replace(/\/+/g, '/').replace(/^\/+/, ''));
+}
+
+function fileStem(filePath: string): string {
+  const name = fileNameFromPath(filePath);
+  const idx = name.lastIndexOf('.');
+  return idx >= 0 ? name.slice(0, idx) : name;
+}
+
+function nextSequenceId(prefix: string, values: string[]): string {
+  const max = values.reduce((current, value) => {
+    const match = value.match(/(\d+)$/);
+    const numeric = match ? Number(match[1]) : 0;
+    return Number.isFinite(numeric) ? Math.max(current, numeric) : current;
+  }, 0);
+  return `${prefix}${max + 1}`;
+}
+
+function newEmptyStructureSection(sid: string): JsonObject {
+  return {
+    title: 'New Section',
+    start_page: null,
+    end_page: null,
+    sid,
+    synopsis: null,
+    learning_outcome: [],
+    case_studies: [],
+    content: [],
+    weight_range: null,
+  };
+}
+
+function mainContentSectionsFromChapter(chapter: JsonObject | null): JsonObject[] {
+  const sections = asRecord(chapter?.sections);
+  const rows = Array.isArray(sections?.main_content_sections) ? sections?.main_content_sections : [];
+  return rows.map((item) => asRecord(item)).filter((item): item is JsonObject => !!item);
+}
+
+function updateMainContentSections(chapter: JsonObject | null, nextSections: JsonObject[]): JsonObject | null {
+  if (!chapter) return null;
+  const sections = asRecord(chapter.sections) || {};
+  return {
+    ...chapter,
+    sections: {
+      ...sections,
+      main_content_sections: nextSections,
+    },
+  };
+}
+
+function updateChapterSection(
+  chapter: JsonObject | null,
+  sid: string,
+  updater: (section: JsonObject) => JsonObject,
+): JsonObject | null {
+  const rows = mainContentSectionsFromChapter(chapter);
+  const nextRows = rows.map((section) => (pickString(section, ['sid']) === sid ? updater(section) : section));
+  return updateMainContentSections(chapter, nextRows);
+}
+
+function removeChapterSection(chapter: JsonObject | null, sid: string): JsonObject | null {
+  const rows = mainContentSectionsFromChapter(chapter).filter((section) => pickString(section, ['sid']) !== sid);
+  return updateMainContentSections(chapter, rows);
+}
+
+function findChapterSection(chapter: JsonObject | null, sid: string): JsonObject | null {
+  return mainContentSectionsFromChapter(chapter).find((section) => pickString(section, ['sid']) === sid) || null;
+}
+
+function sectionContentBlocks(section: JsonObject | null): JsonObject[] {
+  const rows = Array.isArray(section?.content) ? section.content : [];
+  return rows.map((item) => asRecord(item)).filter((item): item is JsonObject => !!item);
+}
+
+function newMindmapNodeDraft(id: string, parentId: string | null, depth: number): MindmapNodeDraft {
+  return {
+    id,
+    label: 'New Node',
+    parent_id: parentId,
+    depth,
+    kind: 'Concept',
+    node_type: depth === 0 ? 'root' : 'node',
+    description: null,
+    ku_ids: [],
+    note: null,
+    icon: null,
+    visual_meta: null,
+    meta: {},
+    children: [],
+  };
+}
+
+function parseMindmapNodeDraft(raw: unknown, fallbackId: string, parentId: string | null, depth: number): MindmapNodeDraft {
+  const record = asRecord(raw) || {};
+  const children = Array.isArray(record.children) ? record.children : [];
+  const id = pickString(record, ['id']) || fallbackId;
+  return {
+    id,
+    label: pickString(record, ['label', 'title', 'name']) || id,
+    parent_id: pickString(record, ['parent_id', 'parentId']) || parentId,
+    depth: toNullableNumber(record.depth) ?? depth,
+    kind: pickString(record, ['kind']) || 'Concept',
+    node_type: pickString(record, ['node_type', 'nodeType']) || (depth === 0 ? 'root' : 'node'),
+    description: typeof record.description === 'string' ? record.description : null,
+    ku_ids: Array.isArray(record.ku_ids) ? record.ku_ids.map((item) => String(item)) : [],
+    note: typeof record.note === 'string' ? record.note : null,
+    icon: typeof record.icon === 'string' ? record.icon : null,
+    visual_meta: asRecord(record.visual_meta),
+    meta: asRecord(record.meta) || {},
+    children: children.map((item, index) => parseMindmapNodeDraft(item, `${id}-${index + 1}`, id, depth + 1)),
+  };
+}
+
+function parseMindmapDraft(raw: string): MindmapDraft | null {
+  const parsed = safeParseJsonRecord(raw);
+  if (!parsed) return null;
+  const rootSource = asRecord(parsed.root) || parsed;
+  return {
+    root: parseMindmapNodeDraft(rootSource, 'root', null, 0),
+    logic: pickString(parsed, ['logic']) || 'hierarchy',
+    markdown: typeof parsed.markdown === 'string' ? parsed.markdown : null,
+  };
+}
+
+function normalizeMindmapNode(node: MindmapNodeDraft, parentId: string | null, depth: number): MindmapNodeDraft {
+  return {
+    ...node,
+    parent_id: parentId,
+    depth,
+    children: node.children.map((child) => normalizeMindmapNode(child, node.id, depth + 1)),
+  };
+}
+
+function flattenMindmapNodes(node: MindmapNodeDraft): FlattenedMindmapNode[] {
+  return [
+    { id: node.id, label: node.label, depth: node.depth, parentId: node.parent_id },
+    ...node.children.flatMap((child) => flattenMindmapNodes(child)),
+  ];
+}
+
+function findMindmapNode(node: MindmapNodeDraft, nodeId: string): MindmapNodeDraft | null {
+  if (node.id === nodeId) return node;
+  for (const child of node.children) {
+    const found = findMindmapNode(child, nodeId);
+    if (found) return found;
+  }
+  return null;
+}
+
+function updateMindmapNodeTree(
+  node: MindmapNodeDraft,
+  nodeId: string,
+  updater: (target: MindmapNodeDraft) => MindmapNodeDraft,
+): MindmapNodeDraft {
+  if (node.id === nodeId) return updater(node);
+  return {
+    ...node,
+    children: node.children.map((child) => updateMindmapNodeTree(child, nodeId, updater)),
+  };
+}
+
+function removeMindmapNodeTree(node: MindmapNodeDraft, nodeId: string): MindmapNodeDraft {
+  return {
+    ...node,
+    children: node.children
+      .filter((child) => child.id !== nodeId)
+      .map((child) => removeMindmapNodeTree(child, nodeId)),
+  };
+}
+
+function moveMindmapNodeWithinSiblings(node: MindmapNodeDraft, nodeId: string, direction: -1 | 1): MindmapNodeDraft {
+  const children = [...node.children];
+  const index = children.findIndex((child) => child.id === nodeId);
+  if (index >= 0) {
+    const targetIndex = index + direction;
+    if (targetIndex >= 0 && targetIndex < children.length) {
+      const [moved] = children.splice(index, 1);
+      children.splice(targetIndex, 0, moved);
+    }
+    return { ...node, children };
+  }
+  return {
+    ...node,
+    children: node.children.map((child) => moveMindmapNodeWithinSiblings(child, nodeId, direction)),
+  };
+}
+
+function serializeMindmapDraft(draft: MindmapDraft): string {
+  return JSON.stringify(
+    {
+      root: normalizeMindmapNode(draft.root, null, 0),
+      logic: draft.logic,
+      markdown: draft.markdown,
+    },
+    null,
+    2,
+  );
 }
 
 function toNullableNumber(value: unknown): number | null {
@@ -827,6 +1276,49 @@ function parseJsonObject(raw: string): JsonObject {
   return parsed as JsonObject;
 }
 
+function formatJsonObject(value: JsonObject): string {
+  return JSON.stringify(value, null, 2);
+}
+
+function humanizeSettingKey(key: string): string {
+  return key
+    .split('_')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function isScalarSettingValue(value: unknown): value is ScalarSettingValue {
+  return value == null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+}
+
+function buildSettingsFormFields(
+  value: JsonObject,
+  predefinedFields: ReadonlyArray<SettingsFormField> = [],
+): SettingsFormField[] {
+  const usedKeys = new Set(predefinedFields.map((field) => field.key));
+  const derivedFields = Object.entries(value)
+    .filter(([key, item]) => !usedKeys.has(key) && isScalarSettingValue(item))
+    .map(([key, item]) => {
+      const kind: SettingsFormFieldKind =
+        item == null ? 'nullable_string' : typeof item === 'boolean' ? 'boolean' : typeof item === 'number' ? 'number' : 'string';
+      return {
+        key,
+        label: humanizeSettingKey(key),
+        kind,
+      } satisfies SettingsFormField;
+    });
+  return [...predefinedFields, ...derivedFields];
+}
+
+function shallowJsonObjectEquals(left: JsonObject, right: JsonObject): boolean {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  for (const key of keys) {
+    if (left[key] !== right[key]) return false;
+  }
+  return true;
+}
+
 export function StepFlowPage() {
   const connected = useChatStore((state) => state.connected);
   const profileRequestRef = useRef(0);
@@ -845,6 +1337,7 @@ export function StepFlowPage() {
     () => JSON.stringify(DEFAULT_GLOBAL_TASK_PARAMS, null, 2),
   );
   const [createGlobalTaskParamsError, setCreateGlobalTaskParamsError] = useState('');
+  const [createSettingsEditorMode, setCreateSettingsEditorMode] = useState<SettingsEditorMode>('form');
   const [createPhaseSettingsRawById, setCreatePhaseSettingsRawById] = useState<Record<string, string>>(
     () => buildInitialPhaseSettingsRawById(),
   );
@@ -901,11 +1394,49 @@ export function StepFlowPage() {
   const [artifactDataUrl, setArtifactDataUrl] = useState('');
   const [artifactDirty, setArtifactDirty] = useState(false);
   const [artifactStatus, setArtifactStatus] = useState('');
+  const [selectedStructureChapterId, setSelectedStructureChapterId] = useState('');
+  const [structureChapterDraft, setStructureChapterDraft] = useState<JsonObject | null>(null);
+  const [structureMiningDraft, setStructureMiningDraft] = useState<JsonObject | null>(null);
+  const [structureLoading, setStructureLoading] = useState(false);
+  const [structureDirty, setStructureDirty] = useState(false);
+  const [structureStatus, setStructureStatus] = useState('');
+  const [structureEditorError, setStructureEditorError] = useState('');
+  const [structureContentImageUrls, setStructureContentImageUrls] = useState<Record<string, string>>({});
+  const [selectedStructureSectionId, setSelectedStructureSectionId] = useState('');
+  const [selectedMindmapPath, setSelectedMindmapPath] = useState('');
+  const [mindmapDraft, setMindmapDraft] = useState<MindmapDraft | null>(null);
+  const [mindmapLoading, setMindmapLoading] = useState(false);
+  const [mindmapDirty, setMindmapDirty] = useState(false);
+  const [mindmapStatus, setMindmapStatus] = useState('');
+  const [mindmapError, setMindmapError] = useState('');
+  const [selectedMindmapNodeId, setSelectedMindmapNodeId] = useState('');
+  const [mindmapNodeImageUrl, setMindmapNodeImageUrl] = useState('');
+  const [mindmapImageUploadStatus, setMindmapImageUploadStatus] = useState('');
+  const [selectedMindmapPreviewPath, setSelectedMindmapPreviewPath] = useState('');
+  const [mindmapPreviewHtml, setMindmapPreviewHtml] = useState('');
+  const [mindmapPreviewLoading, setMindmapPreviewLoading] = useState(false);
+  const [mindmapPreviewError, setMindmapPreviewError] = useState('');
+  const [selectedAssessmentPath, setSelectedAssessmentPath] = useState('');
+  const [assessmentDraft, setAssessmentDraft] = useState<AssessmentDraftItem[]>([]);
+  const [assessmentLoading, setAssessmentLoading] = useState(false);
+  const [assessmentDirty, setAssessmentDirty] = useState(false);
+  const [assessmentStatus, setAssessmentStatus] = useState('');
+  const [assessmentError, setAssessmentError] = useState('');
+  const [selectedAssessmentIndex, setSelectedAssessmentIndex] = useState(0);
+  const [selectedSlideDesignPath, setSelectedSlideDesignPath] = useState('');
+  const [slideDesignDraft, setSlideDesignDraft] = useState<JsonObject | null>(null);
+  const [slideDesignLoading, setSlideDesignLoading] = useState(false);
+  const [slideDesignDirty, setSlideDesignDirty] = useState(false);
+  const [slideDesignStatus, setSlideDesignStatus] = useState('');
+  const [slideDesignError, setSlideDesignError] = useState('');
   const [slideDocId, setSlideDocId] = useState('');
   const [slideChapterId, setSlideChapterId] = useState('');
   const [slideSectionId, setSlideSectionId] = useState('');
   const [slideItemId, setSlideItemId] = useState('');
   const [slideRevisionNote, setSlideRevisionNote] = useState('');
+  const [slidePreviewImageUrl, setSlidePreviewImageUrl] = useState('');
+  const [slidePreviewLoading, setSlidePreviewLoading] = useState(false);
+  const [slidePreviewError, setSlidePreviewError] = useState('');
   const [phaseGuideLoading, setPhaseGuideLoading] = useState(false);
   const [phaseGuideError, setPhaseGuideError] = useState('');
   const [phaseGuideExtra, setPhaseGuideExtra] = useState<PhaseGuideExtra>(() => emptyPhaseGuideExtra());
@@ -939,6 +1470,7 @@ export function StepFlowPage() {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [direction, setDirection] = useState(1);
   const [completed, setCompleted] = useState(false);
+  const [stepFocusCompact, setStepFocusCompact] = useState(false);
   const [confirmByStepId, setConfirmByStepId] = useState<Record<string, boolean>>({});
   const selectedApplicationName = useMemo(() => {
     if (!selectedApplicationId) return 'Not selected';
@@ -951,6 +1483,155 @@ export function StepFlowPage() {
   const selectedArtifact = useMemo(
     () => artifacts.find((item) => item.relativePath === selectedArtifactPath) || null,
     [artifacts, selectedArtifactPath],
+  );
+  const structureChapterOptions = useMemo<StructureChapterOption[]>(() => {
+    const byChapter = new Map<string, StructureChapterOption>();
+    for (const artifact of artifacts.filter((item) => item.phaseId === '02_structure')) {
+      const chapterId = artifact.relativePath.match(/\/(CH-\d+)\//i)?.[1] || '';
+      if (!chapterId) continue;
+      const current = byChapter.get(chapterId) || { chapterId, structurePath: '', miningPath: '' };
+      if (artifact.relativePath.toLowerCase().endsWith('/chapter_structure.json')) {
+        current.structurePath = artifact.relativePath;
+      }
+      if (artifact.relativePath.toLowerCase().endsWith('/chapter_mining.json')) {
+        current.miningPath = artifact.relativePath;
+      }
+      byChapter.set(chapterId, current);
+    }
+    return Array.from(byChapter.values()).sort((a, b) =>
+      a.chapterId.localeCompare(b.chapterId, undefined, { numeric: true, sensitivity: 'base' }),
+    );
+  }, [artifacts]);
+  const selectedStructureChapter = useMemo(
+    () => structureChapterOptions.find((item) => item.chapterId === selectedStructureChapterId) || null,
+    [selectedStructureChapterId, structureChapterOptions],
+  );
+  const selectedStructureSection = useMemo(
+    () => findChapterSection(structureChapterDraft, selectedStructureSectionId) || findChapterSection(structureMiningDraft, selectedStructureSectionId),
+    [selectedStructureSectionId, structureChapterDraft, structureMiningDraft],
+  );
+  const selectedStructureMiningSection = useMemo(
+    () => findChapterSection(structureMiningDraft, selectedStructureSectionId),
+    [selectedStructureSectionId, structureMiningDraft],
+  );
+  const mindmapJsonArtifacts = useMemo(
+    () =>
+      artifacts
+        .filter((item) => item.phaseId === '05_mindmap' && item.relativePath.toLowerCase().endsWith('.mindmap.json'))
+        .sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true, sensitivity: 'base' })),
+    [artifacts],
+  );
+  const mindmapHtmlArtifacts = useMemo(
+    () =>
+      artifacts
+        .filter(
+          (item) =>
+            item.phaseId === '05_mindmap' &&
+            (item.relativePath.toLowerCase().endsWith('.mindmap.html') || item.relativePath.toLowerCase().endsWith('.mindmap.htm')),
+        )
+        .sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true, sensitivity: 'base' })),
+    [artifacts],
+  );
+  const flattenedMindmapNodes = useMemo(
+    () => (mindmapDraft ? flattenMindmapNodes(normalizeMindmapNode(mindmapDraft.root, null, 0)) : []),
+    [mindmapDraft],
+  );
+  const selectedMindmapNode = useMemo(
+    () => (mindmapDraft ? findMindmapNode(mindmapDraft.root, selectedMindmapNodeId) : null),
+    [mindmapDraft, selectedMindmapNodeId],
+  );
+  const assessmentJsonArtifacts = useMemo(() => {
+    const allJsonArtifacts = artifacts
+      .filter((item) => item.phaseId === '06_assessment' && item.relativePath.toLowerCase().endsWith('.json'))
+      .sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true, sensitivity: 'base' }));
+    const questionBankArtifacts = allJsonArtifacts.filter((item) =>
+      /\/(?:success|failed|unverified)\.json$/i.test(item.relativePath),
+    );
+    return questionBankArtifacts.length > 0 ? questionBankArtifacts : allJsonArtifacts;
+  }, [artifacts]);
+  const selectedAssessmentItem = useMemo(
+    () => assessmentDraft[selectedAssessmentIndex] || null,
+    [assessmentDraft, selectedAssessmentIndex],
+  );
+  const selectedAssessmentForm = useMemo(
+    () => asRecord(selectedAssessmentItem?.form),
+    [selectedAssessmentItem],
+  );
+  const selectedAssessmentOptions = useMemo(
+    () =>
+      (Array.isArray(selectedAssessmentForm?.options) ? selectedAssessmentForm.options : [])
+        .map((item) => asRecord(item) || {})
+        .filter((item) => Object.keys(item).length > 0),
+    [selectedAssessmentForm],
+  );
+  const slideDesignArtifacts = useMemo(
+    () =>
+      artifacts
+        .filter(
+          (item) =>
+            item.phaseId === '07_slide' &&
+            item.relativePath.toLowerCase().endsWith('.json') &&
+            /\/designs\/s\d+\.json$/i.test(item.relativePath),
+        )
+        .sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true, sensitivity: 'base' })),
+    [artifacts],
+  );
+  const slideDesignEntries = useMemo(
+    () =>
+      slideDesignArtifacts.map((artifact) => {
+        const parsed = parseSlideIdentifiersFromPath(artifact.relativePath);
+        return {
+          relativePath: artifact.relativePath,
+          chapterId: parsed.chapterId,
+          sectionId: parsed.sectionId,
+          slideId: parsed.slideId || fileStem(artifact.relativePath).toUpperCase(),
+        };
+      }),
+    [slideDesignArtifacts],
+  );
+  const slideChapterOptions = useMemo(
+    () =>
+      Array.from(new Set(slideDesignEntries.map((entry) => entry.chapterId).filter(Boolean))).sort((a, b) =>
+        a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }),
+      ),
+    [slideDesignEntries],
+  );
+  const slideSectionOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          slideDesignEntries
+            .filter((entry) => !slideChapterId || entry.chapterId === slideChapterId)
+            .map((entry) => entry.sectionId)
+            .filter(Boolean),
+        ),
+      ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })),
+    [slideDesignEntries, slideChapterId],
+  );
+  const filteredSlideEntries = useMemo(
+    () =>
+      slideDesignEntries.filter(
+        (entry) =>
+          (!slideChapterId || entry.chapterId === slideChapterId) &&
+          (!slideSectionId || entry.sectionId === slideSectionId),
+      ),
+    [slideDesignEntries, slideChapterId, slideSectionId],
+  );
+  const currentSlidePreviewArtifact = useMemo(() => {
+    const stem = fileStem(selectedSlideDesignPath);
+    if (!stem) return null;
+    return (
+      artifacts.find(
+        (item) =>
+          item.phaseId === '07_slide' &&
+          item.previewType === 'image' &&
+          fileStem(item.relativePath).toLowerCase() === stem.toLowerCase(),
+      ) || null
+    );
+  }, [artifacts, selectedSlideDesignPath]);
+  const selectedSlideDesignEntry = useMemo(
+    () => slideDesignEntries.find((entry) => entry.relativePath === selectedSlideDesignPath) || null,
+    [slideDesignEntries, selectedSlideDesignPath],
   );
   const officialMaterialPaths = useMemo(
     () =>
@@ -998,9 +1679,8 @@ export function StepFlowPage() {
   const createPipelineRunning = createPipelineStatus === 'running';
   const stepRunActive = isStepRunActive(regenStatus.status);
   const slideActionEnabled =
-    selectedPhaseId === '07_slide' &&
     !!selectedApplicationId &&
-    !!slideDocId.trim() &&
+    !!selectedSlideDesignPath &&
     !!slideChapterId.trim() &&
     !!slideSectionId.trim() &&
     !!slideItemId.trim();
@@ -1015,6 +1695,46 @@ export function StepFlowPage() {
   const activeCreatePhaseSettingsError = useMemo(
     () => createPhaseSettingsErrorById[activeCreatePhaseSettingsId] || '',
     [createPhaseSettingsErrorById, activeCreatePhaseSettingsId],
+  );
+  const createGlobalTaskParamsDraft = useMemo(
+    () => safeParseJsonRecord(createGlobalTaskParamsRaw) as JsonObject | null,
+    [createGlobalTaskParamsRaw],
+  );
+  const createGlobalTaskParamsFormSource = useMemo<JsonObject>(
+    () => ({ ...DEFAULT_GLOBAL_TASK_PARAMS, ...(createGlobalTaskParamsDraft || {}) }),
+    [createGlobalTaskParamsDraft],
+  );
+  const activeCreatePhaseSettingsDraft = useMemo(
+    () => safeParseJsonRecord(activeCreatePhaseSettingsRaw) as JsonObject | null,
+    [activeCreatePhaseSettingsRaw],
+  );
+  const activeCreatePhaseSettingsFormSource = useMemo<JsonObject>(
+    () => ({
+      ...(DEFAULT_PHASE_SETTINGS[activeCreatePhaseSettingsId] || {}),
+      ...(activeCreatePhaseSettingsDraft || {}),
+    }),
+    [activeCreatePhaseSettingsDraft, activeCreatePhaseSettingsId],
+  );
+  const activeCreatePhaseSettingsFields = useMemo(
+    () =>
+      buildSettingsFormFields(
+        activeCreatePhaseSettingsFormSource,
+        PHASE_SETTINGS_FIELDS_BY_ID[activeCreatePhaseSettingsId] || [],
+      ),
+    [activeCreatePhaseSettingsFormSource, activeCreatePhaseSettingsId],
+  );
+  const activeCreatePhaseSettingsNestedKeys = useMemo(() => {
+    const editableKeys = new Set(activeCreatePhaseSettingsFields.map((field) => field.key));
+    return Object.entries(activeCreatePhaseSettingsFormSource)
+      .filter(([key, value]) => !editableKeys.has(key) && !isScalarSettingValue(value))
+      .map(([key]) => key);
+  }, [activeCreatePhaseSettingsFields, activeCreatePhaseSettingsFormSource]);
+  const activeGlobalTaskPresetId = useMemo(
+    () =>
+      GLOBAL_TASK_PARAM_PRESETS.find((preset) =>
+        shallowJsonObjectEquals(createGlobalTaskParamsFormSource, preset.values),
+      )?.id || '',
+    [createGlobalTaskParamsFormSource],
   );
 
   useEffect(() => {
@@ -1090,6 +1810,186 @@ export function StepFlowPage() {
     }
   }, [regenStatus.logTail]);
 
+  const updateCreateGlobalTaskParam = useCallback((key: string, value: ScalarSettingValue) => {
+    setCreateGlobalTaskParamsRaw((prev) => {
+      const base = { ...DEFAULT_GLOBAL_TASK_PARAMS, ...(safeParseJsonRecord(prev) || {}) };
+      return formatJsonObject({ ...base, [key]: value });
+    });
+    setCreateGlobalTaskParamsError('');
+  }, []);
+
+  const applyCreateGlobalTaskPreset = useCallback((values: JsonObject) => {
+    setCreateGlobalTaskParamsRaw(formatJsonObject(values));
+    setCreateGlobalTaskParamsError('');
+  }, []);
+
+  const formatCreateGlobalTaskParamsJson = useCallback(() => {
+    try {
+      setCreateGlobalTaskParamsRaw(formatJsonObject(parseJsonObject(createGlobalTaskParamsRaw)));
+      setCreateGlobalTaskParamsError('');
+    } catch (error) {
+      setCreateGlobalTaskParamsError(getErrorMessage(error, 'Invalid global task params JSON'));
+    }
+  }, [createGlobalTaskParamsRaw]);
+
+  const updateCreatePhaseSetting = useCallback((phaseId: string, key: string, value: ScalarSettingValue) => {
+    setCreatePhaseSettingsRawById((prev) => {
+      const base = {
+        ...(DEFAULT_PHASE_SETTINGS[phaseId] || {}),
+        ...(safeParseJsonRecord(prev[phaseId] || '{}') || {}),
+      };
+      return {
+        ...prev,
+        [phaseId]: formatJsonObject({ ...base, [key]: value }),
+      };
+    });
+    setCreatePhaseSettingsErrorById((prev) => ({ ...prev, [phaseId]: '' }));
+  }, []);
+
+  const resetActiveCreatePhaseSettings = useCallback(() => {
+    if (!activeCreatePhaseSettingsId) return;
+    setCreatePhaseSettingsRawById((prev) => ({
+      ...prev,
+      [activeCreatePhaseSettingsId]: formatJsonObject(DEFAULT_PHASE_SETTINGS[activeCreatePhaseSettingsId] || {}),
+    }));
+    setCreatePhaseSettingsErrorById((prev) => ({ ...prev, [activeCreatePhaseSettingsId]: '' }));
+  }, [activeCreatePhaseSettingsId]);
+
+  const formatActiveCreatePhaseSettingsJson = useCallback(() => {
+    if (!activeCreatePhaseSettingsId) return;
+    try {
+      setCreatePhaseSettingsRawById((prev) => ({
+        ...prev,
+        [activeCreatePhaseSettingsId]: formatJsonObject(parseJsonObject(prev[activeCreatePhaseSettingsId] || '{}')),
+      }));
+      setCreatePhaseSettingsErrorById((prev) => ({ ...prev, [activeCreatePhaseSettingsId]: '' }));
+    } catch (error) {
+      setCreatePhaseSettingsErrorById((prev) => ({
+        ...prev,
+        [activeCreatePhaseSettingsId]: getErrorMessage(error, 'Invalid phase settings JSON'),
+      }));
+    }
+  }, [activeCreatePhaseSettingsId]);
+
+  const renderSettingsField = (
+    field: SettingsFormField,
+    value: unknown,
+    onChange: (nextValue: ScalarSettingValue) => void,
+  ) => {
+    const textInputClassName =
+      'w-full rounded-md border border-aegis-border bg-aegis-elevated px-3 py-2 text-[12px] text-aegis-text outline-none';
+
+    if (field.kind === 'boolean') {
+      const current = value === true;
+      return (
+        <div
+          key={field.key}
+          className="rounded-md border border-aegis-border bg-aegis-card p-3 space-y-2"
+        >
+          <div className="space-y-1">
+            <p className="text-[12px] text-aegis-text">{field.label}</p>
+            {field.description ? <p className="text-[11px] text-aegis-text-dim">{field.description}</p> : null}
+          </div>
+          <div className="inline-flex rounded-md border border-aegis-border overflow-hidden">
+            <button
+              type="button"
+              onClick={() => onChange(true)}
+              className={clsx(
+                'px-3 py-1.5 text-[11px]',
+                current
+                  ? 'bg-aegis-primary/15 text-aegis-primary'
+                  : 'bg-aegis-card text-aegis-text-dim hover:bg-[rgb(var(--aegis-overlay)/0.04)]',
+              )}
+            >
+              Enabled
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange(false)}
+              className={clsx(
+                'border-l border-aegis-border px-3 py-1.5 text-[11px]',
+                !current
+                  ? 'bg-aegis-primary/15 text-aegis-primary'
+                  : 'bg-aegis-card text-aegis-text-dim hover:bg-[rgb(var(--aegis-overlay)/0.04)]',
+              )}
+            >
+              Disabled
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (field.kind === 'select') {
+      return (
+        <label
+          key={field.key}
+          className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-card p-3"
+        >
+          <span className="text-[12px] text-aegis-text">{field.label}</span>
+          {field.description ? <span className="text-[11px] text-aegis-text-dim">{field.description}</span> : null}
+          <select
+            value={typeof value === 'string' ? value : ''}
+            onChange={(event) => onChange(event.target.value)}
+            className={textInputClassName}
+          >
+            {(field.options || []).map((option) => (
+              <option key={`${field.key}-${option.value}`} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      );
+    }
+
+    if (field.kind === 'number') {
+      const numericValue = typeof value === 'number' && Number.isFinite(value) ? value : '';
+      return (
+        <label
+          key={field.key}
+          className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-card p-3"
+        >
+          <span className="text-[12px] text-aegis-text">{field.label}</span>
+          {field.description ? <span className="text-[11px] text-aegis-text-dim">{field.description}</span> : null}
+          <input
+            type="number"
+            min={field.min}
+            max={field.max}
+            step={field.step || 1}
+            value={numericValue}
+            onChange={(event) => {
+              const nextValue = Number(event.target.value);
+              if (Number.isFinite(nextValue)) onChange(nextValue);
+            }}
+            className={textInputClassName}
+          />
+        </label>
+      );
+    }
+
+    const normalizedValue =
+      value == null ? '' : typeof value === 'string' ? value : String(value);
+    return (
+      <label
+        key={field.key}
+        className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-card p-3"
+      >
+        <span className="text-[12px] text-aegis-text">{field.label}</span>
+        {field.description ? <span className="text-[11px] text-aegis-text-dim">{field.description}</span> : null}
+        <input
+          type="text"
+          value={normalizedValue}
+          placeholder={field.placeholder}
+          onChange={(event) =>
+            onChange(field.kind === 'nullable_string' && !event.target.value.trim() ? null : event.target.value)
+          }
+          className={textInputClassName}
+        />
+      </label>
+    );
+  };
+
   useEffect(() => {
     setCreatePhaseSelection((prev) => {
       const textbookEnabled = !!prev['00_textbook'];
@@ -1109,16 +2009,48 @@ export function StepFlowPage() {
   const continueDisabled = completed || (needsConfirm && !currentConfirmed);
   const guidePhaseId = useMemo(() => {
     const stepId = currentStep?.id || '';
-    if (stepId && phases.some((phase) => phase.id === stepId)) return stepId;
+    if (stepId && PIPELINE_PHASE_TEMPLATES.some((phase) => phase.id === stepId)) return stepId;
     return selectedPhaseId;
-  }, [currentStep?.id, phases, selectedPhaseId]);
+  }, [currentStep?.id, selectedPhaseId]);
   const guidePhase = useMemo(
     () => phases.find((phase) => phase.id === guidePhaseId) || null,
     [guidePhaseId, phases],
   );
+  const phaseWorkspaceSplitClass = useMemo(() => {
+    if (guidePhaseId === '02_structure') {
+      return 'xl:grid-cols-[minmax(260px,0.58fr)_minmax(0,1.42fr)]';
+    }
+    if (guidePhaseId === '05_mindmap') {
+      return 'xl:grid-cols-[minmax(280px,0.64fr)_minmax(0,1.36fr)]';
+    }
+    if (guidePhaseId === '07_slide') {
+      return 'xl:grid-cols-[minmax(320px,0.78fr)_minmax(0,1.22fr)]';
+    }
+    return 'xl:grid-cols-[minmax(300px,0.72fr)_minmax(0,1.28fr)]';
+  }, [guidePhaseId]);
+  const workspaceSplitClass = useMemo(
+    () => (stepFocusCompact ? 'xl:grid-cols-[minmax(220px,0.42fr)_minmax(0,1.58fr)]' : phaseWorkspaceSplitClass),
+    [phaseWorkspaceSplitClass, stepFocusCompact],
+  );
+  const phaseArtifacts = useMemo(
+    () => artifacts.filter((artifact) => artifact.phaseId === guidePhaseId),
+    [artifacts, guidePhaseId],
+  );
+  const editablePhaseArtifacts = useMemo(
+    () => phaseArtifacts.filter((artifact) => artifact.editable),
+    [phaseArtifacts],
+  );
+  const imagePhaseArtifacts = useMemo(
+    () => phaseArtifacts.filter((artifact) => artifact.previewType === 'image'),
+    [phaseArtifacts],
+  );
+  const readOnlyPhaseArtifacts = useMemo(
+    () => phaseArtifacts.filter((artifact) => !artifact.editable && artifact.previewType !== 'image'),
+    [phaseArtifacts],
+  );
   const phaseGuide = useMemo<PhaseGuideView | null>(() => {
     if (!guidePhaseId) return null;
-    const files = artifacts.filter((artifact) => artifact.phaseId === guidePhaseId);
+    const files = phaseArtifacts;
     const relativePaths = files.map((artifact) => artifact.relativePath);
     const findPath = (needle: string): string =>
       relativePaths.find((path) => path.toLowerCase().endsWith(needle.toLowerCase())) || '';
@@ -1316,7 +2248,7 @@ export function StepFlowPage() {
     }
 
     return base;
-  }, [artifacts, guidePhase, phaseGuideExtra, guidePhaseId]);
+  }, [guidePhase, phaseArtifacts, phaseGuideExtra, guidePhaseId]);
 
   const progressPercent = useMemo(() => {
     if (flow.steps.length === 0) return 0;
@@ -1448,11 +2380,12 @@ export function StepFlowPage() {
     const requestDocumentName = selectedDocumentName;
     const requestPhaseId = selectedPhaseId;
     try {
+      const artifactLimit = selectedPhaseId === '07_slide' ? 2000 : 400;
       const payload = await gateway.call('ontosynth.creation.artifacts.list', {
         applicationId: selectedApplicationId,
         documentName: selectedDocumentName,
         phaseId: selectedPhaseId || undefined,
-        limit: 400,
+        limit: artifactLimit,
       });
       if (artifactsRequestRef.current !== requestId) return;
       if (
@@ -1585,31 +2518,756 @@ export function StepFlowPage() {
     }
   }, [connected, selectedArtifact, selectedArtifactPath, artifactKind, artifactText, loadArtifacts]);
 
-  const populateSlideIdsFromArtifact = useCallback(() => {
-    if (artifactKind !== 'json' || !artifactText.trim()) {
-      setRegenStatus((prev) => ({
-        ...prev,
-        message: 'Select a slide JSON artifact first to auto-fill IDs.',
-      }));
+  const readTextArtifact = useCallback(async (relativePath: string): Promise<string> => {
+    if (!connected || !relativePath) throw new Error('Artifact path is required');
+    const payload = await gateway.call('ontosynth.creation.artifacts.read', { relativePath });
+    if (!payload || payload.status === 'error') {
+      throw new Error(getErrorMessage(payload?.error, 'ontosynth.creation.artifacts.read failed'));
+    }
+    const record = asRecord(payload);
+    return typeof record?.content === 'string' ? record.content : '';
+  }, [connected]);
+
+  const readImageArtifactDataUrl = useCallback(async (relativePath: string): Promise<string> => {
+    if (!connected || !relativePath) return '';
+    const payload = await gateway.call('ontosynth.creation.artifacts.read', { relativePath });
+    if (!payload || payload.status === 'error') {
+      throw new Error(getErrorMessage(payload?.error, 'ontosynth.creation.artifacts.read failed'));
+    }
+    const record = asRecord(payload);
+    const mime = typeof record?.mime === 'string' && record.mime ? record.mime : 'image/png';
+    const contentBase64 = typeof record?.content_base64 === 'string' ? record.content_base64 : '';
+    if (contentBase64) return `data:${mime};base64,${contentBase64}`;
+    const textContent = typeof record?.content === 'string' ? record.content : '';
+    if (textContent.trim().startsWith('data:')) return textContent.trim();
+    return '';
+  }, [connected]);
+
+  const inlineMindmapHtmlImageAssets = useCallback(
+    async (html: string, previewPath: string): Promise<string> => {
+      if (!html || !previewPath) return html;
+      const matches = html.match(
+        /(?:\.\.\/|\.\/)?assets\/[A-Za-z0-9._/-]+\.(?:png|jpe?g|webp|gif|bmp|svg)(?:\?[^"'`\s)]+)?/gi,
+      );
+      if (!matches || matches.length === 0) return html;
+
+      const uniquePaths = Array.from(new Set(matches));
+      const replacements = new Map<string, string>();
+
+      await Promise.all(
+        uniquePaths.map(async (rawPath) => {
+          const normalizedPath = String(rawPath || '').trim();
+          if (!normalizedPath) return;
+          const resolvedPath = joinRelativeArtifactPath(previewPath, normalizedPath);
+          if (!resolvedPath) return;
+          try {
+            const dataUrl = await readImageArtifactDataUrl(resolvedPath);
+            if (dataUrl) replacements.set(normalizedPath, dataUrl);
+          } catch {
+            // Ignore missing assets and leave original relative path in place.
+          }
+        }),
+      );
+
+      if (replacements.size === 0) return html;
+      let hydrated = html;
+      replacements.forEach((dataUrl, rawPath) => {
+        hydrated = hydrated.split(rawPath).join(dataUrl);
+      });
+      return hydrated;
+    },
+    [readImageArtifactDataUrl],
+  );
+
+  const writeJsonArtifact = useCallback(async (relativePath: string, value: unknown) => {
+    if (!connected || !relativePath) throw new Error('Artifact path is required');
+    const content = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    const payload = await gateway.call('ontosynth.creation.artifacts.write', {
+      relativePath,
+      content,
+    });
+    if (!payload || payload.status === 'error') {
+      throw new Error(getErrorMessage(payload?.error, 'ontosynth.creation.artifacts.write failed'));
+    }
+  }, [connected]);
+
+  const fileToBase64 = useCallback((file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = typeof reader.result === 'string' ? reader.result : '';
+        const base64 = result.includes(',') ? result.split(',')[1] || '' : result;
+        if (!base64) {
+          reject(new Error('Failed to encode file'));
+          return;
+        }
+        resolve(base64);
+      };
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+  }, []);
+
+  const uploadBinaryArtifact = useCallback(async (relativePath: string, file: File) => {
+    if (!connected || !relativePath) throw new Error('Artifact path is required');
+    const contentBase64 = await fileToBase64(file);
+    const payload = await gateway.call('ontosynth.creation.artifacts.write_binary', {
+      relativePath,
+      mime: file.type,
+      content_base64: contentBase64,
+    });
+    if (!payload || payload.status === 'error') {
+      throw new Error(getErrorMessage(payload?.error, 'ontosynth.creation.artifacts.write_binary failed'));
+    }
+  }, [connected, fileToBase64]);
+
+  useEffect(() => {
+    setSelectedStructureChapterId((current) => {
+      if (current && structureChapterOptions.some((item) => item.chapterId === current)) return current;
+      return structureChapterOptions[0]?.chapterId || '';
+    });
+  }, [structureChapterOptions]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedStructureChapter?.structurePath || !selectedStructureChapter?.miningPath) {
+      setStructureChapterDraft(null);
+      setStructureMiningDraft(null);
+      setStructureDirty(false);
+      setStructureEditorError('');
       return;
     }
-    const parsed = parseSlideIdentifiersFromJson(artifactText);
-    setSlideDocId((prev) => prev || parsed.docId);
-    setSlideChapterId((prev) => prev || parsed.chapterId);
-    setSlideSectionId((prev) => prev || parsed.sectionId);
-    setSlideItemId((prev) => prev || parsed.slideId);
-    if (!parsed.docId || !parsed.chapterId || !parsed.sectionId || !parsed.slideId) {
-      setRegenStatus((prev) => ({
-        ...prev,
-        message: 'Some slide IDs were not found in JSON. Fill the missing fields manually.',
-      }));
+    const loadStructureWorkspace = async () => {
+      setStructureLoading(true);
+      setStructureEditorError('');
+      try {
+        const [structureText, miningText] = await Promise.all([
+          readTextArtifact(selectedStructureChapter.structurePath),
+          readTextArtifact(selectedStructureChapter.miningPath),
+        ]);
+        if (cancelled) return;
+        const structureParsed = safeParseJsonRecord(structureText) as JsonObject | null;
+        const miningParsed = safeParseJsonRecord(miningText) as JsonObject | null;
+        if (!structureParsed || !miningParsed) throw new Error('Failed to parse structure workspace JSON');
+        setStructureChapterDraft(structureParsed);
+        setStructureMiningDraft(miningParsed);
+        setStructureDirty(false);
+        const sectionOptions = mainContentSectionsFromChapter(structureParsed);
+        setSelectedStructureSectionId((current) => {
+          if (current && sectionOptions.some((item) => pickString(item, ['sid']) === current)) return current;
+          return pickString(sectionOptions[0] || {}, ['sid']);
+        });
+      } catch (error) {
+        if (!cancelled) {
+          setStructureChapterDraft(null);
+          setStructureMiningDraft(null);
+          setStructureEditorError(getErrorMessage(error, 'Failed to load structure workspace'));
+        }
+      } finally {
+        if (!cancelled) setStructureLoading(false);
+      }
+    };
+    void loadStructureWorkspace();
+    return () => {
+      cancelled = true;
+    };
+  }, [readTextArtifact, selectedStructureChapter]);
+
+  useEffect(() => {
+    const options = mainContentSectionsFromChapter(structureChapterDraft);
+    setSelectedStructureSectionId((current) => {
+      if (current && options.some((item) => pickString(item, ['sid']) === current)) return current;
+      return pickString(options[0] || {}, ['sid']);
+    });
+  }, [structureChapterDraft]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const sectionId = pickString(selectedStructureSection, ['sid']);
+    const miningPath = selectedStructureChapter?.miningPath || '';
+    const blocks = sectionContentBlocks(selectedStructureMiningSection);
+    if (!sectionId || !miningPath || blocks.length === 0) {
+      setStructureContentImageUrls({});
       return;
     }
-    setRegenStatus((prev) => ({
-      ...prev,
-      message: 'Slide identifiers filled from artifact JSON.',
+    const loadStructureImagePreviews = async () => {
+      const nextUrls: Record<string, string> = {};
+      await Promise.all(
+        blocks.map(async (block, index) => {
+          const uri = pickString(block, ['uri']).trim();
+          if (!uri) return;
+          const key = `${sectionId}:${index}:${uri}`;
+          if (isExternalImageUri(uri)) {
+            nextUrls[key] = uri;
+            return;
+          }
+          const candidates = resolveStructureImageCandidatePaths(miningPath, uri);
+          for (const candidate of candidates) {
+            try {
+              const dataUrl = await readImageArtifactDataUrl(candidate);
+              if (dataUrl) {
+                nextUrls[key] = dataUrl;
+                break;
+              }
+            } catch {
+              // Ignore read errors and continue to the next candidate path.
+            }
+          }
+        }),
+      );
+      if (!cancelled) {
+        setStructureContentImageUrls(nextUrls);
+      }
+    };
+    void loadStructureImagePreviews();
+    return () => {
+      cancelled = true;
+    };
+  }, [readImageArtifactDataUrl, selectedStructureChapter?.miningPath, selectedStructureMiningSection, selectedStructureSection]);
+
+  useEffect(() => {
+    setSelectedMindmapPath((current) => {
+      if (current && mindmapJsonArtifacts.some((item) => item.relativePath === current)) return current;
+      return mindmapJsonArtifacts[0]?.relativePath || '';
+    });
+  }, [mindmapJsonArtifacts]);
+
+  useEffect(() => {
+    setSelectedMindmapPreviewPath((current) => {
+      if (current && mindmapHtmlArtifacts.some((item) => item.relativePath === current)) return current;
+      const expectedHtmlPath = selectedMindmapPath ? selectedMindmapPath.replace(/\.json$/i, '.html') : '';
+      const matched = mindmapHtmlArtifacts.find(
+        (item) => item.relativePath.toLowerCase() === expectedHtmlPath.toLowerCase(),
+      );
+      if (matched) return matched.relativePath;
+      const selectedDir = selectedMindmapPath.split('/').slice(0, -1).join('/');
+      const sibling = mindmapHtmlArtifacts.find(
+        (item) => item.relativePath.split('/').slice(0, -1).join('/') === selectedDir,
+      );
+      return sibling?.relativePath || mindmapHtmlArtifacts[0]?.relativePath || '';
+    });
+  }, [mindmapHtmlArtifacts, selectedMindmapPath]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedMindmapPath) {
+      setMindmapDraft(null);
+      setSelectedMindmapNodeId('');
+      setMindmapDirty(false);
+      setMindmapError('');
+      return;
+    }
+    const loadMindmapWorkspace = async () => {
+      setMindmapLoading(true);
+      setMindmapError('');
+      try {
+        const content = await readTextArtifact(selectedMindmapPath);
+        if (cancelled) return;
+        const parsed = parseMindmapDraft(content);
+        if (!parsed) throw new Error('Failed to parse mindmap JSON');
+        const normalized = {
+          ...parsed,
+          root: normalizeMindmapNode(parsed.root, null, 0),
+        };
+        setMindmapDraft(normalized);
+        setSelectedMindmapNodeId((current) => current || normalized.root.id);
+        setMindmapDirty(false);
+        setMindmapNodeImageUrl('');
+      } catch (error) {
+        if (!cancelled) {
+          setMindmapDraft(null);
+          setSelectedMindmapNodeId('');
+          setMindmapError(getErrorMessage(error, 'Failed to load mindmap workspace'));
+        }
+      } finally {
+        if (!cancelled) setMindmapLoading(false);
+      }
+    };
+    void loadMindmapWorkspace();
+    return () => {
+      cancelled = true;
+    };
+  }, [readTextArtifact, selectedMindmapPath]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedMindmapPreviewPath) {
+      setMindmapPreviewHtml('');
+      setMindmapPreviewLoading(false);
+      setMindmapPreviewError('');
+      return;
+    }
+    const loadMindmapPreview = async () => {
+      setMindmapPreviewLoading(true);
+      setMindmapPreviewError('');
+      try {
+        const rawHtml = await readTextArtifact(selectedMindmapPreviewPath);
+        if (cancelled) return;
+        const hydratedHtml = await inlineMindmapHtmlImageAssets(rawHtml || '', selectedMindmapPreviewPath);
+        if (cancelled) return;
+        setMindmapPreviewHtml(hydratedHtml || '');
+      } catch (error) {
+        if (!cancelled) {
+          setMindmapPreviewHtml('');
+          setMindmapPreviewError(getErrorMessage(error, 'Failed to load mindmap HTML preview'));
+        }
+      } finally {
+        if (!cancelled) setMindmapPreviewLoading(false);
+      }
+    };
+    void loadMindmapPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [inlineMindmapHtmlImageAssets, readTextArtifact, selectedMindmapPreviewPath]);
+
+  useEffect(() => {
+    const nodeIds = new Set(flattenedMindmapNodes.map((item) => item.id));
+    setSelectedMindmapNodeId((current) => {
+      if (current && nodeIds.has(current)) return current;
+      return flattenedMindmapNodes[0]?.id || '';
+    });
+  }, [flattenedMindmapNodes]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedMindmapPath || !selectedMindmapNode?.visual_meta) {
+      setMindmapNodeImageUrl('');
+      return;
+    }
+    const relativeUri = typeof selectedMindmapNode.visual_meta.uri === 'string' ? selectedMindmapNode.visual_meta.uri : '';
+    const resolvedPath = joinRelativeArtifactPath(selectedMindmapPath, relativeUri);
+    if (!resolvedPath) {
+      setMindmapNodeImageUrl('');
+      return;
+    }
+    void readImageArtifactDataUrl(resolvedPath)
+      .then((dataUrl) => {
+        if (!cancelled) setMindmapNodeImageUrl(dataUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setMindmapNodeImageUrl('');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [readImageArtifactDataUrl, selectedMindmapNode, selectedMindmapPath]);
+
+  useEffect(() => {
+    setSelectedAssessmentPath((current) => {
+      if (current && assessmentJsonArtifacts.some((item) => item.relativePath === current)) return current;
+      return assessmentJsonArtifacts.find((item) => item.relativePath.toLowerCase().endsWith('/success.json'))?.relativePath
+        || assessmentJsonArtifacts[0]?.relativePath
+        || '';
+    });
+  }, [assessmentJsonArtifacts]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedAssessmentPath) {
+      setAssessmentDraft([]);
+      setAssessmentDirty(false);
+      setAssessmentError('');
+      return;
+    }
+    const loadAssessmentWorkspace = async () => {
+      setAssessmentLoading(true);
+      setAssessmentError('');
+      try {
+        const content = await readTextArtifact(selectedAssessmentPath);
+        if (cancelled) return;
+        const parsed = safeParseJsonArray(content);
+        if (!parsed) throw new Error('Assessment file is not a JSON array');
+        setAssessmentDraft(parsed.map((item) => asRecord(item) || {}).filter((item) => Object.keys(item).length > 0));
+        setAssessmentDirty(false);
+        setSelectedAssessmentIndex(0);
+      } catch (error) {
+        if (!cancelled) {
+          setAssessmentDraft([]);
+          setAssessmentError(getErrorMessage(error, 'Failed to load assessment workspace'));
+        }
+      } finally {
+        if (!cancelled) setAssessmentLoading(false);
+      }
+    };
+    void loadAssessmentWorkspace();
+    return () => {
+      cancelled = true;
+    };
+  }, [readTextArtifact, selectedAssessmentPath]);
+
+  useEffect(() => {
+    setSlideChapterId((current) => {
+      if (current && slideChapterOptions.includes(current)) return current;
+      return slideChapterOptions[0] || '';
+    });
+  }, [slideChapterOptions]);
+
+  useEffect(() => {
+    setSlideSectionId((current) => {
+      if (current && slideSectionOptions.includes(current)) return current;
+      return slideSectionOptions[0] || '';
+    });
+  }, [slideSectionOptions]);
+
+  useEffect(() => {
+    setSelectedSlideDesignPath((current) => {
+      if (current && filteredSlideEntries.some((entry) => entry.relativePath === current)) return current;
+      return filteredSlideEntries[0]?.relativePath || '';
+    });
+  }, [filteredSlideEntries]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedSlideDesignPath) {
+      setSlideDesignDraft(null);
+      setSlideDesignDirty(false);
+      setSlideDesignError('');
+      return;
+    }
+    const loadSlideWorkspace = async () => {
+      setSlideDesignLoading(true);
+      setSlideDesignError('');
+      try {
+        const content = await readTextArtifact(selectedSlideDesignPath);
+        if (cancelled) return;
+        const parsed = safeParseJsonRecord(content) as JsonObject | null;
+        if (!parsed) throw new Error('Failed to parse slide design JSON');
+        setSlideDesignDraft(parsed);
+        setSlideDesignDirty(false);
+      } catch (error) {
+        if (!cancelled) {
+          setSlideDesignDraft(null);
+          setSlideDesignError(getErrorMessage(error, 'Failed to load slide workspace'));
+        }
+      } finally {
+        if (!cancelled) setSlideDesignLoading(false);
+      }
+    };
+    void loadSlideWorkspace();
+    return () => {
+      cancelled = true;
+    };
+  }, [readTextArtifact, selectedSlideDesignPath]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const previewPath = currentSlidePreviewArtifact?.relativePath || '';
+    if (!previewPath) {
+      setSlidePreviewImageUrl('');
+      setSlidePreviewLoading(false);
+      setSlidePreviewError('');
+      return;
+    }
+    const loadSlidePreview = async () => {
+      setSlidePreviewLoading(true);
+      setSlidePreviewError('');
+      try {
+        const dataUrl = await readImageArtifactDataUrl(previewPath);
+        if (cancelled) return;
+        if (!dataUrl) {
+          setSlidePreviewImageUrl('');
+          setSlidePreviewError('Preview image is unavailable for this slide.');
+          return;
+        }
+        setSlidePreviewImageUrl(dataUrl);
+      } catch (error) {
+        if (!cancelled) {
+          setSlidePreviewImageUrl('');
+          setSlidePreviewError(getErrorMessage(error, 'Failed to load slide preview image'));
+        }
+      } finally {
+        if (!cancelled) setSlidePreviewLoading(false);
+      }
+    };
+    void loadSlidePreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSlidePreviewArtifact, readImageArtifactDataUrl]);
+
+  const updateStructureChapterField = useCallback((key: string, value: unknown) => {
+    setStructureChapterDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
+    setStructureMiningDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
+    setStructureDirty(true);
+    setStructureStatus('');
+  }, []);
+
+  const updateStructureSectionField = useCallback((sid: string, key: string, value: unknown) => {
+    setStructureChapterDraft((prev) => updateChapterSection(prev, sid, (section) => ({ ...section, [key]: value })));
+    setStructureMiningDraft((prev) => updateChapterSection(prev, sid, (section) => ({ ...section, [key]: value })));
+    setStructureDirty(true);
+    setStructureStatus('');
+  }, []);
+
+  const updateStructureMiningOnlySectionField = useCallback((sid: string, key: string, value: unknown) => {
+    setStructureMiningDraft((prev) => updateChapterSection(prev, sid, (section) => ({ ...section, [key]: value })));
+    setStructureDirty(true);
+    setStructureStatus('');
+  }, []);
+
+  const addStructureSection = useCallback(() => {
+    const existing = mainContentSectionsFromChapter(structureChapterDraft).map((section) => pickString(section, ['sid']));
+    const sid = nextSequenceId('SEC-', existing);
+    const blankSection = newEmptyStructureSection(sid);
+    setStructureChapterDraft((prev) => updateMainContentSections(prev, [...mainContentSectionsFromChapter(prev), blankSection]));
+    setStructureMiningDraft((prev) => updateMainContentSections(prev, [...mainContentSectionsFromChapter(prev), blankSection]));
+    setSelectedStructureSectionId(sid);
+    setStructureDirty(true);
+    setStructureStatus('');
+  }, [structureChapterDraft]);
+
+  const removeStructureSection = useCallback((sid: string) => {
+    setStructureChapterDraft((prev) => removeChapterSection(prev, sid));
+    setStructureMiningDraft((prev) => removeChapterSection(prev, sid));
+    setSelectedStructureSectionId((current) => (current === sid ? '' : current));
+    setStructureDirty(true);
+    setStructureStatus('');
+  }, []);
+
+  const addStructureContentBlock = useCallback((sid: string) => {
+    setStructureMiningDraft((prev) =>
+      updateChapterSection(prev, sid, (section) => ({
+        ...section,
+        content: [...sectionContentBlocks(section), { type: 'paragraph', page_no: null, text: '', uri: '' }],
+      })),
+    );
+    setStructureDirty(true);
+    setStructureStatus('');
+  }, []);
+
+  const updateStructureContentBlock = useCallback((sid: string, index: number, key: string, value: unknown) => {
+    setStructureMiningDraft((prev) =>
+      updateChapterSection(prev, sid, (section) => ({
+        ...section,
+        content: sectionContentBlocks(section).map((item, itemIndex) =>
+          itemIndex === index ? { ...item, [key]: value } : item,
+        ),
+      })),
+    );
+    setStructureDirty(true);
+    setStructureStatus('');
+  }, []);
+
+  const removeStructureContentBlock = useCallback((sid: string, index: number) => {
+    setStructureMiningDraft((prev) =>
+      updateChapterSection(prev, sid, (section) => ({
+        ...section,
+        content: sectionContentBlocks(section).filter((_, itemIndex) => itemIndex !== index),
+      })),
+    );
+    setStructureDirty(true);
+    setStructureStatus('');
+  }, []);
+
+  const saveStructureWorkspace = useCallback(async () => {
+    if (!selectedStructureChapter?.structurePath || !selectedStructureChapter?.miningPath || !structureChapterDraft || !structureMiningDraft) return;
+    try {
+      await Promise.all([
+        writeJsonArtifact(selectedStructureChapter.structurePath, structureChapterDraft),
+        writeJsonArtifact(selectedStructureChapter.miningPath, structureMiningDraft),
+      ]);
+      setStructureDirty(false);
+      setStructureStatus('Structure workspace saved');
+      setStructureEditorError('');
+      void loadArtifacts();
+    } catch (error) {
+      setStructureEditorError(getErrorMessage(error, 'Failed to save structure workspace'));
+    }
+  }, [loadArtifacts, selectedStructureChapter, structureChapterDraft, structureMiningDraft, writeJsonArtifact]);
+
+  const updateMindmapNodeDraft = useCallback((nodeId: string, updater: (node: MindmapNodeDraft) => MindmapNodeDraft) => {
+    setMindmapDraft((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        root: normalizeMindmapNode(updateMindmapNodeTree(prev.root, nodeId, updater), null, 0),
+      };
+    });
+    setMindmapDirty(true);
+    setMindmapStatus('');
+  }, []);
+
+  const addMindmapChildNode = useCallback((nodeId: string) => {
+    setMindmapDraft((prev) => {
+      if (!prev) return prev;
+      const nextRoot = updateMindmapNodeTree(prev.root, nodeId, (target) => ({
+        ...target,
+        children: [
+          ...target.children,
+          newMindmapNodeDraft(nextSequenceId('node_', flattenMindmapNodes(prev.root).map((item) => item.id)), target.id, target.depth + 1),
+        ],
+      }));
+      return { ...prev, root: normalizeMindmapNode(nextRoot, null, 0) };
+    });
+    setMindmapDirty(true);
+    setMindmapStatus('');
+  }, []);
+
+  const addMindmapSiblingNode = useCallback((nodeId: string) => {
+    if (!mindmapDraft) return;
+    const target = findMindmapNode(mindmapDraft.root, nodeId);
+    if (!target?.parent_id) return;
+    const newId = nextSequenceId('node_', flattenMindmapNodes(mindmapDraft.root).map((item) => item.id));
+    setMindmapDraft((prev) => {
+      if (!prev) return prev;
+      const nextRoot = updateMindmapNodeTree(prev.root, target.parent_id as string, (parent) => ({
+        ...parent,
+        children: [
+          ...parent.children,
+          newMindmapNodeDraft(newId, parent.id, parent.depth + 1),
+        ],
+      }));
+      return { ...prev, root: normalizeMindmapNode(nextRoot, null, 0) };
+    });
+    setSelectedMindmapNodeId(newId);
+    setMindmapDirty(true);
+    setMindmapStatus('');
+  }, [mindmapDraft]);
+
+  const removeMindmapNode = useCallback((nodeId: string) => {
+    if (!mindmapDraft || mindmapDraft.root.id === nodeId) return;
+    setMindmapDraft((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        root: normalizeMindmapNode(removeMindmapNodeTree(prev.root, nodeId), null, 0),
+      };
+    });
+    setSelectedMindmapNodeId((current) => (current === nodeId ? mindmapDraft.root.id : current));
+    setMindmapDirty(true);
+    setMindmapStatus('');
+  }, [mindmapDraft]);
+
+  const moveMindmapNode = useCallback((nodeId: string, direction: -1 | 1) => {
+    setMindmapDraft((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        root: normalizeMindmapNode(moveMindmapNodeWithinSiblings(prev.root, nodeId, direction), null, 0),
+      };
+    });
+    setMindmapDirty(true);
+    setMindmapStatus('');
+  }, []);
+
+  const saveMindmapWorkspace = useCallback(async () => {
+    if (!selectedMindmapPath || !mindmapDraft) return;
+    try {
+      await writeJsonArtifact(selectedMindmapPath, serializeMindmapDraft(mindmapDraft));
+      setMindmapDirty(false);
+      setMindmapStatus('Mindmap saved');
+      setMindmapError('');
+      void loadArtifacts();
+    } catch (error) {
+      setMindmapError(getErrorMessage(error, 'Failed to save mindmap workspace'));
+    }
+  }, [loadArtifacts, mindmapDraft, selectedMindmapPath, writeJsonArtifact]);
+
+  const openMindmapPreviewWindow = useCallback(async () => {
+    if (!selectedMindmapPreviewPath) {
+      setMindmapPreviewError('No HTML preview file selected for this mindmap.');
+      return;
+    }
+    if (mindmapPreviewLoading) return;
+    setMindmapPreviewError('');
+    try {
+      const sourceHtml = mindmapPreviewHtml || (await readTextArtifact(selectedMindmapPreviewPath));
+      if (!sourceHtml.trim()) throw new Error('Mindmap HTML preview is empty.');
+      const htmlContent = await inlineMindmapHtmlImageAssets(sourceHtml, selectedMindmapPreviewPath);
+      const previewTitle = fileNameFromPath(selectedMindmapPreviewPath) || 'mindmap-preview.html';
+      const result = await window.aegis?.artifact?.open?.({
+        type: 'html',
+        title: previewTitle,
+        content: htmlContent,
+      });
+      if (!result?.success) {
+        const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+        const fallbackUrl = URL.createObjectURL(blob);
+        const popup = window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
+        window.setTimeout(() => URL.revokeObjectURL(fallbackUrl), 60_000);
+        if (!popup) {
+          throw new Error(result?.error || 'Failed to open mindmap preview window.');
+        }
+      }
+    } catch (error) {
+      setMindmapPreviewError(getErrorMessage(error, 'Failed to open mindmap preview window'));
+    }
+  }, [
+    inlineMindmapHtmlImageAssets,
+    mindmapPreviewHtml,
+    mindmapPreviewLoading,
+    readTextArtifact,
+    selectedMindmapPreviewPath,
+  ]);
+
+  const clearMindmapNodeImage = useCallback(() => {
+    if (!selectedMindmapNodeId) return;
+    updateMindmapNodeDraft(selectedMindmapNodeId, (node) => ({
+      ...node,
+      visual_meta: {
+        ...(node.visual_meta || {}),
+        uri: null,
+      },
     }));
-  }, [artifactKind, artifactText]);
+    setMindmapNodeImageUrl('');
+  }, [selectedMindmapNodeId, updateMindmapNodeDraft]);
+
+  const handleMindmapImageUpload = useCallback(async (file: File | null) => {
+    if (!file || !selectedMindmapPath || !selectedMindmapNodeId) return;
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, '_');
+    const relativeAssetUri = `assets/${Date.now()}_${safeName}`;
+    const targetPath = joinRelativeArtifactPath(selectedMindmapPath, relativeAssetUri);
+    try {
+      setMindmapImageUploadStatus('Uploading image...');
+      await uploadBinaryArtifact(targetPath, file);
+      updateMindmapNodeDraft(selectedMindmapNodeId, (node) => ({
+        ...node,
+        visual_meta: {
+          ...(node.visual_meta || {}),
+          uri: relativeAssetUri,
+          status: 'uploaded',
+        },
+      }));
+      setMindmapNodeImageUrl(await readImageArtifactDataUrl(targetPath));
+      setMindmapImageUploadStatus('Image attached');
+      void loadArtifacts();
+    } catch (error) {
+      setMindmapImageUploadStatus(getErrorMessage(error, 'Failed to upload image'));
+    }
+  }, [loadArtifacts, readImageArtifactDataUrl, selectedMindmapNodeId, selectedMindmapPath, updateMindmapNodeDraft, uploadBinaryArtifact]);
+
+  const updateAssessmentItem = useCallback((index: number, updater: (item: AssessmentDraftItem) => AssessmentDraftItem) => {
+    setAssessmentDraft((prev) => prev.map((item, itemIndex) => (itemIndex === index ? updater(item) : item)));
+    setAssessmentDirty(true);
+    setAssessmentStatus('');
+  }, []);
+
+  const saveAssessmentWorkspace = useCallback(async () => {
+    if (!selectedAssessmentPath) return;
+    try {
+      await writeJsonArtifact(selectedAssessmentPath, assessmentDraft);
+      setAssessmentDirty(false);
+      setAssessmentStatus('Assessment file saved');
+      setAssessmentError('');
+      void loadArtifacts();
+    } catch (error) {
+      setAssessmentError(getErrorMessage(error, 'Failed to save assessment workspace'));
+    }
+  }, [assessmentDraft, loadArtifacts, selectedAssessmentPath, writeJsonArtifact]);
+
+  const saveSlideDesignWorkspace = useCallback(async () => {
+    if (!selectedSlideDesignPath || !slideDesignDraft) return;
+    try {
+      await writeJsonArtifact(selectedSlideDesignPath, slideDesignDraft);
+      setSlideDesignDirty(false);
+      setSlideDesignStatus('Slide design saved');
+      setSlideDesignError('');
+      void loadArtifacts();
+    } catch (error) {
+      setSlideDesignError(getErrorMessage(error, 'Failed to save slide design'));
+    }
+  }, [loadArtifacts, selectedSlideDesignPath, slideDesignDraft, writeJsonArtifact]);
 
   const regeneratePhase = useCallback(async () => {
     if (!connected || !selectedApplicationId || !selectedDocumentName || !selectedPhaseId) return;
@@ -1661,10 +3319,10 @@ export function StepFlowPage() {
     const chapterId = slideChapterId.trim();
     const sectionId = slideSectionId.trim();
     const slideId = slideItemId.trim();
-    if (!docId || !chapterId || !sectionId || !slideId) {
+    if (!chapterId || !sectionId || !slideId) {
       setRegenStatus({
         status: 'error',
-        message: 'Slide run requires docId, chapterId, sectionId, and slideId.',
+        message: 'Slide run requires chapterId, sectionId, and slideId.',
         runId: '',
         logTail: '',
         mode: 'slide',
@@ -1687,7 +3345,7 @@ export function StepFlowPage() {
       const payload = await gateway.call('ontosynth.creation.slide.regenerate.start', {
         applicationId: selectedApplicationId,
         documentName: selectedDocumentName || undefined,
-        docId,
+        docId: docId || undefined,
         chapterId,
         sectionId,
         slideId,
@@ -1803,9 +3461,9 @@ export function StepFlowPage() {
         if (typeof window !== 'undefined') {
           window.localStorage.setItem(flowStorageKey(selectedApplicationId), rawJson);
         }
-        setSaveStatus(`Saved for ${selectedApplicationName}`);
+        setSaveStatus(`Workflow saved for ${selectedApplicationName}`);
       } catch {
-        setSaveStatus('Saved (session only)');
+        setSaveStatus('Workflow saved (session only)');
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to parse step JSON.';
@@ -2793,15 +4451,30 @@ export function StepFlowPage() {
   }, [workflowMode, connected, selectedApplicationId, guidePhaseId, artifacts]);
 
   useEffect(() => {
-    if (selectedPhaseId !== '07_slide') return;
-    if (artifactKind !== 'json' || !artifactText.trim()) return;
-    const parsed = parseSlideIdentifiersFromJson(artifactText);
-    if (!parsed.docId && !parsed.chapterId && !parsed.sectionId && !parsed.slideId) return;
-    setSlideDocId((prev) => prev || parsed.docId);
-    setSlideChapterId((prev) => prev || parsed.chapterId);
-    setSlideSectionId((prev) => prev || parsed.sectionId);
-    setSlideItemId((prev) => prev || parsed.slideId);
-  }, [selectedPhaseId, artifactKind, artifactText]);
+    let cancelled = false;
+    if (!selectedSlideDesignPath) return;
+    const parsedPath = parseSlideIdentifiersFromPath(selectedSlideDesignPath);
+    if (parsedPath.chapterId) setSlideChapterId(parsedPath.chapterId);
+    if (parsedPath.sectionId) setSlideSectionId(parsedPath.sectionId);
+    if (parsedPath.slideId) setSlideItemId(parsedPath.slideId);
+    const milestonePath = selectedSlideDesignPath.replace(/\/designs\/[^/]+\.json$/i, '/milestone.json');
+    if (milestonePath === selectedSlideDesignPath) return;
+    const loadDocIdFromMilestone = async () => {
+      try {
+        const text = await readTextArtifact(milestonePath);
+        if (cancelled) return;
+        const parsed = safeParseJsonRecord(text);
+        const nextDocId = pickString(parsed, ['doc_id', 'docId', 'document_id', 'documentId']);
+        if (nextDocId) setSlideDocId(nextDocId);
+      } catch {
+        // Ignore missing milestone files; backend may infer docId.
+      }
+    };
+    void loadDocIdFromMilestone();
+    return () => {
+      cancelled = true;
+    };
+  }, [readTextArtifact, selectedSlideDesignPath]);
 
   useEffect(() => {
     if (!regenStatus.runId) return;
@@ -2938,8 +4611,25 @@ export function StepFlowPage() {
                   </label>
                 </div>
                 <div className="rounded-md border border-aegis-primary/20 bg-aegis-primary/[0.04] p-3 space-y-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <p className="text-[12px] text-aegis-text-dim">Pipeline Phases & Detail Settings</p>
+                    <div className="ml-auto inline-flex rounded-md border border-aegis-border overflow-hidden">
+                      {(['form', 'json'] as const).map((mode) => (
+                        <button
+                          key={`create-settings-mode-${mode}`}
+                          type="button"
+                          onClick={() => setCreateSettingsEditorMode(mode)}
+                          className={clsx(
+                            'px-2.5 py-1 text-[10px]',
+                            createSettingsEditorMode === mode
+                              ? 'bg-aegis-primary/15 text-aegis-primary'
+                              : 'bg-aegis-card text-aegis-text-dim hover:bg-[rgb(var(--aegis-overlay)/0.04)]',
+                          )}
+                        >
+                          {mode === 'form' ? 'Form Mode' : 'JSON Mode'}
+                        </button>
+                      ))}
+                    </div>
                     <button
                       type="button"
                       onClick={() => {
@@ -2997,45 +4687,161 @@ export function StepFlowPage() {
                       })}
                     </div>
                     <div className="space-y-2">
-                      <label className="flex flex-col gap-1">
-                        <span className="text-[11px] text-aegis-text-dim">Global Task Params (JSON)</span>
-                        <textarea
-                          value={createGlobalTaskParamsRaw}
-                          onChange={(event) => {
-                            setCreateGlobalTaskParamsRaw(event.target.value);
-                            setCreateGlobalTaskParamsError('');
-                          }}
-                          className="w-full min-h-[90px] rounded-md border border-aegis-border bg-aegis-elevated px-2 py-2 text-[11px] text-aegis-text font-mono resize-y outline-none"
-                          spellCheck={false}
-                        />
-                      </label>
-                      {createGlobalTaskParamsError ? (
-                        <p className="text-[11px] text-aegis-danger">Global params: {createGlobalTaskParamsError}</p>
-                      ) : null}
-                      <div className="rounded-md border border-aegis-border bg-aegis-card p-2">
-                        {activeCreatePhaseSettingsId ? (
-                          <>
-                            <p className="text-[11px] text-aegis-text-dim mb-1">
-                              {PIPELINE_PHASE_TEMPLATES.find((phase) => phase.id === activeCreatePhaseSettingsId)?.title || activeCreatePhaseSettingsId} Settings (JSON)
+                      {createSettingsEditorMode === 'form' ? (
+                        <>
+                          <div className="rounded-md border border-aegis-border bg-aegis-card p-2 space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-[11px] text-aegis-text-dim">Global Task Params</p>
+                              <div className="ml-auto flex flex-wrap gap-1">
+                                {GLOBAL_TASK_PARAM_PRESETS.map((preset) => (
+                                  <button
+                                    key={`global-task-preset-${preset.id}`}
+                                    type="button"
+                                    onClick={() => applyCreateGlobalTaskPreset(preset.values)}
+                                    className={clsx(
+                                      'rounded-md border px-2 py-1 text-[10px]',
+                                      activeGlobalTaskPresetId === preset.id
+                                        ? 'border-aegis-primary/45 bg-aegis-primary/15 text-aegis-primary'
+                                        : 'border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]',
+                                    )}
+                                    title={preset.description}
+                                  >
+                                    {preset.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <p className="text-[11px] text-aegis-text-dim">
+                              Higher parallelism improves throughput but increases CPU and memory pressure.
                             </p>
+                            {!createGlobalTaskParamsDraft ? (
+                              <p className="text-[11px] text-aegis-warning">
+                                Current JSON is invalid. Editing here will rebuild this section from the default keys.
+                              </p>
+                            ) : null}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                              {GLOBAL_TASK_PARAM_FIELDS.map((field) =>
+                                renderSettingsField(
+                                  field,
+                                  createGlobalTaskParamsFormSource[field.key],
+                                  (value) => updateCreateGlobalTaskParam(field.key, value),
+                                ),
+                              )}
+                            </div>
+                            {createGlobalTaskParamsError ? (
+                              <p className="text-[11px] text-aegis-danger">Global params: {createGlobalTaskParamsError}</p>
+                            ) : null}
+                          </div>
+                          <div className="rounded-md border border-aegis-border bg-aegis-card p-2 space-y-2">
+                            {activeCreatePhaseSettingsId ? (
+                              <>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="text-[11px] text-aegis-text-dim">
+                                    {PIPELINE_PHASE_TEMPLATES.find((phase) => phase.id === activeCreatePhaseSettingsId)?.title || activeCreatePhaseSettingsId} Settings
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={resetActiveCreatePhaseSettings}
+                                    className="ml-auto rounded-md border border-aegis-border px-2 py-1 text-[10px] text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+                                  >
+                                    Reset Phase
+                                  </button>
+                                </div>
+                                {!activeCreatePhaseSettingsDraft ? (
+                                  <p className="text-[11px] text-aegis-warning">
+                                    Current JSON is invalid. Editing here will rebuild this phase from its default keys.
+                                  </p>
+                                ) : null}
+                                {activeCreatePhaseSettingsFields.length > 0 ? (
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    {activeCreatePhaseSettingsFields.map((field) =>
+                                      renderSettingsField(
+                                        field,
+                                        activeCreatePhaseSettingsFormSource[field.key],
+                                        (value) => updateCreatePhaseSetting(activeCreatePhaseSettingsId, field.key, value),
+                                      ),
+                                    )}
+                                  </div>
+                                ) : (
+                                  <p className="text-[11px] text-aegis-text-dim">
+                                    No structured fields are available for this phase yet. Use JSON mode for advanced edits.
+                                  </p>
+                                )}
+                                {activeCreatePhaseSettingsNestedKeys.length > 0 ? (
+                                  <p className="text-[11px] text-aegis-text-dim">
+                                    Advanced JSON only: {activeCreatePhaseSettingsNestedKeys.join(', ')}
+                                  </p>
+                                ) : null}
+                                {activeCreatePhaseSettingsError ? (
+                                  <p className="text-[11px] text-aegis-danger">Phase settings: {activeCreatePhaseSettingsError}</p>
+                                ) : null}
+                              </>
+                            ) : (
+                              <p className="text-[11px] text-aegis-text-dim">No phase selected.</p>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="rounded-md border border-aegis-border bg-aegis-card p-2 space-y-1">
+                            <div className="flex items-center gap-2">
+                              <p className="text-[11px] text-aegis-text-dim">Global Task Params (JSON)</p>
+                              <button
+                                type="button"
+                                onClick={formatCreateGlobalTaskParamsJson}
+                                className="ml-auto rounded-md border border-aegis-border px-2 py-1 text-[10px] text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+                              >
+                                Format JSON
+                              </button>
+                            </div>
                             <textarea
-                              value={activeCreatePhaseSettingsRaw}
+                              value={createGlobalTaskParamsRaw}
                               onChange={(event) => {
-                                const phaseId = activeCreatePhaseSettingsId;
-                                setCreatePhaseSettingsRawById((prev) => ({ ...prev, [phaseId]: event.target.value }));
-                                setCreatePhaseSettingsErrorById((prev) => ({ ...prev, [phaseId]: '' }));
+                                setCreateGlobalTaskParamsRaw(event.target.value);
+                                setCreateGlobalTaskParamsError('');
                               }}
-                              className="w-full min-h-[190px] rounded-md border border-aegis-border bg-aegis-elevated px-2 py-2 text-[11px] text-aegis-text font-mono resize-y outline-none"
+                              className="w-full min-h-[90px] rounded-md border border-aegis-border bg-aegis-elevated px-2 py-2 text-[11px] text-aegis-text font-mono resize-y outline-none"
                               spellCheck={false}
                             />
-                            {activeCreatePhaseSettingsError ? (
-                              <p className="mt-1 text-[11px] text-aegis-danger">Phase settings: {activeCreatePhaseSettingsError}</p>
+                            {createGlobalTaskParamsError ? (
+                              <p className="text-[11px] text-aegis-danger">Global params: {createGlobalTaskParamsError}</p>
                             ) : null}
-                          </>
-                        ) : (
-                          <p className="text-[11px] text-aegis-text-dim">No phase selected.</p>
-                        )}
-                      </div>
+                          </div>
+                          <div className="rounded-md border border-aegis-border bg-aegis-card p-2">
+                            {activeCreatePhaseSettingsId ? (
+                              <>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <p className="text-[11px] text-aegis-text-dim">
+                                    {PIPELINE_PHASE_TEMPLATES.find((phase) => phase.id === activeCreatePhaseSettingsId)?.title || activeCreatePhaseSettingsId} Settings (JSON)
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={formatActiveCreatePhaseSettingsJson}
+                                    className="ml-auto rounded-md border border-aegis-border px-2 py-1 text-[10px] text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+                                  >
+                                    Format JSON
+                                  </button>
+                                </div>
+                                <textarea
+                                  value={activeCreatePhaseSettingsRaw}
+                                  onChange={(event) => {
+                                    const phaseId = activeCreatePhaseSettingsId;
+                                    setCreatePhaseSettingsRawById((prev) => ({ ...prev, [phaseId]: event.target.value }));
+                                    setCreatePhaseSettingsErrorById((prev) => ({ ...prev, [phaseId]: '' }));
+                                  }}
+                                  className="w-full min-h-[190px] rounded-md border border-aegis-border bg-aegis-elevated px-2 py-2 text-[11px] text-aegis-text font-mono resize-y outline-none"
+                                  spellCheck={false}
+                                />
+                                {activeCreatePhaseSettingsError ? (
+                                  <p className="mt-1 text-[11px] text-aegis-danger">Phase settings: {activeCreatePhaseSettingsError}</p>
+                                ) : null}
+                              </>
+                            ) : (
+                              <p className="text-[11px] text-aegis-text-dim">No phase selected.</p>
+                            )}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -3560,65 +5366,6 @@ export function StepFlowPage() {
                 Restart Steps
               </button>
             </div>
-            {selectedPhaseId === '07_slide' ? (
-              <div className="mt-3 rounded-md border border-aegis-primary/25 bg-aegis-primary/[0.08] p-2.5 space-y-2">
-                <div className="flex items-center gap-2">
-                  <p className="text-[11px] text-aegis-text-dim">Slide Regeneration</p>
-                  <button
-                    type="button"
-                    onClick={populateSlideIdsFromArtifact}
-                    className="ml-auto px-2 py-1 text-[10px] rounded-md border border-aegis-accent/30 bg-aegis-accent/[0.1] text-aegis-accent hover:bg-aegis-accent/[0.16]"
-                  >
-                    Use IDs from JSON
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <input
-                    value={slideDocId}
-                    onChange={(event) => setSlideDocId(event.target.value)}
-                    placeholder="docId"
-                    className="w-full rounded-md border border-aegis-border bg-aegis-elevated px-2 py-1.5 text-[11px] text-aegis-text outline-none"
-                  />
-                  <input
-                    value={slideChapterId}
-                    onChange={(event) => setSlideChapterId(event.target.value)}
-                    placeholder="chapterId"
-                    className="w-full rounded-md border border-aegis-border bg-aegis-elevated px-2 py-1.5 text-[11px] text-aegis-text outline-none"
-                  />
-                  <input
-                    value={slideSectionId}
-                    onChange={(event) => setSlideSectionId(event.target.value)}
-                    placeholder="sectionId"
-                    className="w-full rounded-md border border-aegis-border bg-aegis-elevated px-2 py-1.5 text-[11px] text-aegis-text outline-none"
-                  />
-                  <input
-                    value={slideItemId}
-                    onChange={(event) => setSlideItemId(event.target.value)}
-                    placeholder="slideId"
-                    className="w-full rounded-md border border-aegis-border bg-aegis-elevated px-2 py-1.5 text-[11px] text-aegis-text outline-none"
-                  />
-                </div>
-                <input
-                  value={slideRevisionNote}
-                  onChange={(event) => setSlideRevisionNote(event.target.value)}
-                  placeholder="Revision note (optional)"
-                  className="w-full rounded-md border border-aegis-border bg-aegis-elevated px-2 py-1.5 text-[11px] text-aegis-text outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => void regenerateSlide()}
-                  disabled={!slideActionEnabled || stepRunActive}
-                  className={clsx(
-                    'px-2.5 py-1.5 text-[11px] rounded-md text-white',
-                    slideActionEnabled && !stepRunActive
-                      ? 'bg-aegis-primary shadow-[0_0_0_1px_rgba(var(--aegis-primary),0.35)] hover:opacity-90'
-                      : 'bg-aegis-text-dim opacity-60 cursor-not-allowed',
-                  )}
-                >
-                  {stepRunActive && regenStatus.mode === 'slide' ? 'Running Slide...' : 'Regenerate Slide'}
-                </button>
-              </div>
-            ) : null}
             {artifactsError && <p className="mt-2 text-[11px] text-aegis-danger">{artifactsError}</p>}
             {(regenStatus.runId || regenStatus.message) ? (
               <div className="mt-2 rounded-md border border-aegis-accent/25 bg-aegis-accent/[0.06] p-2">
@@ -3683,12 +5430,19 @@ export function StepFlowPage() {
       </section>
 
       <section className="flex-1 min-h-0 rounded-2xl border border-aegis-primary/15 bg-aegis-primary/[0.03] p-4 overflow-hidden">
-        <div className="h-full min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)] gap-4">
+        <div className={clsx('h-full min-h-0 grid grid-cols-1 gap-4', workspaceSplitClass)}>
           <div className="min-h-0 flex flex-col">
             <div className="shrink-0">
-              <div className="flex items-center justify-between text-[12px] text-aegis-text-dim">
+              <div className="flex flex-wrap items-center gap-2 text-[12px] text-aegis-text-dim">
                 <span>{completed ? 'Completed' : `Step ${currentStepIndex + 1} / ${flow.steps.length}`}</span>
-                <span>{progressPercent}%</span>
+                <span className="ml-auto">{progressPercent}%</span>
+                <button
+                  type="button"
+                  onClick={() => setStepFocusCompact((prev) => !prev)}
+                  className="px-2 py-1 text-[10px] rounded-md border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+                >
+                  {stepFocusCompact ? 'Expand Focus' : 'Compact Focus'}
+                </button>
               </div>
               <div className="mt-2 h-2 rounded-full bg-aegis-elevated overflow-hidden">
                 <div
@@ -3722,7 +5476,7 @@ export function StepFlowPage() {
                       exit={{ opacity: 0, x: direction > 0 ? -40 : 40 }}
                       transition={{ duration: 0.22 }}
                     >
-                      {phaseGuide ? (
+                      {!stepFocusCompact && phaseGuide ? (
                         <div className="mb-4 rounded-xl border border-aegis-accent/25 bg-aegis-accent/[0.06] p-3">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="text-[12px] font-semibold text-aegis-text">Step Focus · {phaseGuide.title}</p>
@@ -3883,9 +5637,17 @@ export function StepFlowPage() {
                           ) : null}
                         </div>
                       ) : null}
-                      <h2 className="text-[22px] font-semibold text-aegis-text">{currentStep.title}</h2>
-                      <p className="mt-3 text-[14px] text-aegis-text whitespace-pre-wrap leading-6">{currentStep.content}</p>
-                      {currentStep.bullets.length > 0 && (
+                      <h2 className={clsx('font-semibold text-aegis-text', stepFocusCompact ? 'text-[18px]' : 'text-[22px]')}>
+                        {currentStep.title}
+                      </h2>
+                      {stepFocusCompact ? (
+                        <p className="mt-2 text-[12px] text-aegis-text-dim">
+                          Step focus compact mode is on. Use the button above to expand details.
+                        </p>
+                      ) : (
+                        <p className="mt-3 text-[14px] text-aegis-text whitespace-pre-wrap leading-6">{currentStep.content}</p>
+                      )}
+                      {!stepFocusCompact && currentStep.bullets.length > 0 && (
                         <ul className="mt-4 space-y-2 text-[13px] text-aegis-text-dim">
                           {currentStep.bullets.map((bullet, index) => (
                             <li key={`${currentStep.id}-bullet-${index}`} className="flex items-start gap-2">
@@ -3919,7 +5681,7 @@ export function StepFlowPage() {
                       onClick={() => setEditorOpen((v) => !v)}
                       className="px-2.5 py-1.5 text-[12px] rounded-lg border border-aegis-accent/30 bg-aegis-accent/[0.08] text-aegis-accent hover:bg-aegis-accent/[0.15]"
                     >
-                      {editorOpen ? 'Hide JSON' : 'Edit JSON'}
+                      {editorOpen ? 'Hide Workflow JSON' : 'Advanced Workflow'}
                     </button>
                     <button
                       type="button"
@@ -3937,9 +5699,10 @@ export function StepFlowPage() {
                     <button
                       type="button"
                       onClick={onSave}
+                      title="Save workflow configuration (not phase files)"
                       className="px-2.5 py-1.5 text-[12px] rounded-lg border border-aegis-success/30 bg-aegis-success/[0.08] text-aegis-success hover:bg-aegis-success/[0.14]"
                     >
-                      Save
+                      Save Workflow
                     </button>
                     <button
                       type="button"
@@ -3993,81 +5756,1173 @@ export function StepFlowPage() {
             </div>
           </div>
 
-          <div className="min-h-0 rounded-xl border border-aegis-primary/20 bg-aegis-primary/[0.04] p-3 flex flex-col">
-            <div className="shrink-0 flex flex-wrap items-center gap-2">
-              <span className="text-[12px] text-aegis-text-dim">Generated Content</span>
-              <select
-                value={selectedArtifactPath}
-                onChange={(event) => {
-                  setSelectedArtifactPath(event.target.value);
-                  setArtifactStatus('');
-                }}
-                className="flex-1 min-w-[220px] bg-aegis-card border border-aegis-primary/20 rounded-md px-2 py-1 text-[12px] text-aegis-text outline-none"
-              >
-                {artifacts.length === 0 && <option value="">{artifactsLoading ? 'Loading...' : 'No files'}</option>}
-                {artifacts.map((artifact) => (
-                  <option key={artifact.relativePath} value={artifact.relativePath}>
-                    {artifact.phaseId} · {artifact.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => void saveArtifact()}
-                disabled={!artifactDirty || !(artifactKind === 'json' || artifactKind === 'text') || !selectedArtifact?.editable}
-                className={clsx(
-                  'px-2.5 py-1.5 text-[12px] rounded-lg border',
-                  !artifactDirty || !(artifactKind === 'json' || artifactKind === 'text') || !selectedArtifact?.editable
-                    ? 'border-aegis-border text-aegis-text-dim opacity-60 cursor-not-allowed'
-                    : 'border-aegis-success/30 bg-aegis-success/[0.08] text-aegis-success hover:bg-aegis-success/[0.14]',
-                )}
-              >
-                Save File
-              </button>
-            </div>
-            {selectedArtifact && (
-              <p className="mt-1 text-[11px] text-aegis-text-dim break-all">{selectedArtifact.relativePath}</p>
-            )}
-            {selectedArtifact && !selectedArtifact.editable && (
-              <p className="mt-1 text-[11px] text-aegis-warning">This artifact is read-only.</p>
-            )}
-            {artifactStatus && <p className="mt-1 text-[11px] text-aegis-text-dim">{artifactStatus}</p>}
-            {regenStatus.logTail && (
-              <details className="mt-2 rounded border border-aegis-accent/25 bg-aegis-accent/[0.06] px-2 py-1">
-                <summary className="text-[11px] text-aegis-text-dim cursor-pointer">Run log</summary>
-                <pre className="mt-2 max-h-[120px] overflow-auto text-[11px] text-aegis-text whitespace-pre-wrap">{regenStatus.logTail}</pre>
-              </details>
-            )}
-
-            <div className="mt-3 flex-1 min-h-0 rounded-lg border border-aegis-primary/20 bg-aegis-card overflow-hidden">
-              {artifactReadLoading ? (
-                <div className="h-full flex items-center justify-center text-[12px] text-aegis-text-dim">Loading file...</div>
-              ) : artifactKind === 'image' && artifactDataUrl ? (
-                <div className="h-full overflow-auto p-2">
-                  <img src={artifactDataUrl} alt={selectedArtifact?.name || 'artifact'} className="max-w-full h-auto rounded-md" />
+          <div className="min-h-0 rounded-xl border border-aegis-primary/20 bg-aegis-primary/[0.04] p-3 flex flex-col overflow-hidden">
+            <div className="shrink-0">
+              <div className="flex flex-wrap items-start gap-2">
+                <div>
+                  <p className="text-[12px] text-aegis-text-dim">Phase Workspace</p>
+                  <p className="mt-1 text-[11px] text-aegis-text-dim">
+                    {guidePhaseId
+                      ? `Focused editing for ${PIPELINE_PHASE_TEMPLATES.find((phase) => phase.id === guidePhaseId)?.title || guidePhaseId}.`
+                      : 'Select a workflow step to load a phase workspace.'}
+                  </p>
                 </div>
-              ) : artifactKind === 'json' || artifactKind === 'text' ? (
-                <textarea
-                  value={artifactText}
-                  onChange={(event) => {
-                    if (!selectedArtifact?.editable) return;
-                    setArtifactText(event.target.value);
-                    setArtifactDirty(true);
-                    setArtifactStatus('');
-                  }}
-                  readOnly={!selectedArtifact?.editable}
-                  className="w-full h-full bg-transparent p-3 text-[12px] text-aegis-text font-mono resize-none outline-none"
-                  spellCheck={false}
-                />
-              ) : selectedArtifactPath ? (
-                <div className="h-full flex items-center justify-center text-[12px] text-aegis-text-dim">
-                  {artifactMime ? `Preview not available (${artifactMime})` : 'Preview not available'}
+                <button
+                  type="button"
+                  onClick={() => setStepFocusCompact((prev) => !prev)}
+                  className="ml-auto px-2 py-1 text-[10px] rounded-md border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+                >
+                  {stepFocusCompact ? 'Expand Step Focus' : 'Compact Step Focus'}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-3 flex-1 min-h-0 overflow-hidden">
+              {guidePhaseId === '02_structure' ? (
+                <div className="h-full flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={selectedStructureChapterId}
+                      onChange={(event) => {
+                        setSelectedStructureChapterId(event.target.value);
+                        setStructureStatus('');
+                      }}
+                      className="min-w-[180px] rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[12px] text-aegis-text outline-none"
+                    >
+                      {structureChapterOptions.length === 0 && <option value="">No chapters</option>}
+                      {structureChapterOptions.map((chapter) => (
+                        <option key={`structure-${chapter.chapterId}`} value={chapter.chapterId}>
+                          {chapter.chapterId}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={addStructureSection}
+                      disabled={!structureChapterDraft}
+                      className="px-2.5 py-1.5 text-[12px] rounded-lg border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)] disabled:opacity-50"
+                    >
+                      Add Section
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void saveStructureWorkspace()}
+                      disabled={!structureDirty}
+                      className={clsx(
+                        'ml-auto px-2.5 py-1.5 text-[12px] rounded-lg border',
+                        structureDirty
+                          ? 'border-aegis-success/30 bg-aegis-success/[0.08] text-aegis-success hover:bg-aegis-success/[0.14]'
+                          : 'border-aegis-border text-aegis-text-dim opacity-60 cursor-not-allowed',
+                      )}
+                    >
+                      Save Structure
+                    </button>
+                  </div>
+                  {structureStatus ? <p className="text-[11px] text-aegis-text-dim">{structureStatus}</p> : null}
+                  {structureEditorError ? <p className="text-[11px] text-aegis-danger">{structureEditorError}</p> : null}
+                  <div className="flex-1 min-h-0 rounded-lg border border-aegis-primary/20 bg-aegis-card overflow-hidden">
+                    {structureLoading ? (
+                      <div className="h-full flex items-center justify-center text-[12px] text-aegis-text-dim">Loading structure workspace...</div>
+                    ) : structureChapterDraft ? (
+                      <div className="h-full grid grid-cols-1 xl:grid-cols-[200px_minmax(0,1fr)] gap-0">
+                        <div className="border-r border-aegis-border overflow-auto p-2">
+                          <p className="text-[10px] uppercase tracking-[0.04em] text-aegis-text-dim">Sections</p>
+                          <div className="mt-2 space-y-1">
+                            {mainContentSectionsFromChapter(structureChapterDraft).map((section) => {
+                              const sid = pickString(section, ['sid']);
+                              const active = sid === selectedStructureSectionId;
+                              return (
+                                <button
+                                  key={`structure-section-${sid}`}
+                                  type="button"
+                                  onClick={() => setSelectedStructureSectionId(sid)}
+                                  className={clsx(
+                                    'w-full rounded-md border px-2 py-2 text-left',
+                                    active
+                                      ? 'border-aegis-primary/40 bg-aegis-primary/[0.10]'
+                                      : 'border-aegis-border bg-aegis-card hover:bg-[rgb(var(--aegis-overlay)/0.04)]',
+                                  )}
+                                >
+                                  <p className={clsx('text-[11px] font-medium', active ? 'text-aegis-primary' : 'text-aegis-text')}>
+                                    {sid || 'Unknown'}
+                                  </p>
+                                  <p className="mt-0.5 text-[10px] text-aegis-text-dim whitespace-normal break-words">
+                                    {pickString(section, ['title']) || 'Untitled section'}
+                                  </p>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        <div className="overflow-auto p-3 space-y-3">
+                          <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_112px_112px] gap-2">
+                            <label className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                              <span className="text-[11px] text-aegis-text-dim">Chapter Title</span>
+                              <input
+                                value={pickString(structureChapterDraft, ['title'])}
+                                onChange={(event) => updateStructureChapterField('title', event.target.value)}
+                                className="rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[12px] text-aegis-text outline-none"
+                              />
+                            </label>
+                            <label className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                              <span className="text-[11px] text-aegis-text-dim">Chapter Start</span>
+                              <input
+                                type="number"
+                                value={toNullableNumber(structureChapterDraft.start_page) ?? ''}
+                                onChange={(event) => updateStructureChapterField('start_page', event.target.value ? Number(event.target.value) : null)}
+                                className="rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[12px] text-aegis-text outline-none"
+                              />
+                            </label>
+                            <label className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                              <span className="text-[11px] text-aegis-text-dim">Chapter End</span>
+                              <input
+                                type="number"
+                                value={toNullableNumber(structureChapterDraft.end_page) ?? ''}
+                                onChange={(event) => updateStructureChapterField('end_page', event.target.value ? Number(event.target.value) : null)}
+                                className="rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[12px] text-aegis-text outline-none"
+                              />
+                            </label>
+                          </div>
+
+                          {selectedStructureSection ? (
+                            <div className="space-y-3">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-[12px] font-medium text-aegis-text">
+                                  Section {pickString(selectedStructureSection, ['sid']) || 'Unknown'}
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => removeStructureSection(pickString(selectedStructureSection, ['sid']))}
+                                  className="ml-auto px-2 py-1 text-[10px] rounded-md border border-aegis-danger/30 bg-aegis-danger/[0.06] text-aegis-danger hover:bg-aegis-danger/[0.12]"
+                                >
+                                  Remove Section
+                                </button>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_112px_112px] gap-2">
+                                <label className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                                  <span className="text-[11px] text-aegis-text-dim">Section Title</span>
+                                  <input
+                                    value={pickString(selectedStructureSection, ['title'])}
+                                    onChange={(event) =>
+                                      updateStructureSectionField(pickString(selectedStructureSection, ['sid']), 'title', event.target.value)
+                                    }
+                                    className="rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[12px] text-aegis-text outline-none"
+                                  />
+                                </label>
+                                <label className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                                  <span className="text-[11px] text-aegis-text-dim">Start Page</span>
+                                  <input
+                                    type="number"
+                                    value={toNullableNumber(selectedStructureSection.start_page) ?? ''}
+                                    onChange={(event) =>
+                                      updateStructureSectionField(
+                                        pickString(selectedStructureSection, ['sid']),
+                                        'start_page',
+                                        event.target.value ? Number(event.target.value) : null,
+                                      )
+                                    }
+                                    className="rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[12px] text-aegis-text outline-none"
+                                  />
+                                </label>
+                                <label className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                                  <span className="text-[11px] text-aegis-text-dim">End Page</span>
+                                  <input
+                                    type="number"
+                                    value={toNullableNumber(selectedStructureSection.end_page) ?? ''}
+                                    onChange={(event) =>
+                                      updateStructureSectionField(
+                                        pickString(selectedStructureSection, ['sid']),
+                                        'end_page',
+                                        event.target.value ? Number(event.target.value) : null,
+                                      )
+                                    }
+                                    className="rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[12px] text-aegis-text outline-none"
+                                  />
+                                </label>
+                              </div>
+                              <label className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                                <span className="text-[11px] text-aegis-text-dim">Synopsis</span>
+                                <textarea
+                                  value={typeof selectedStructureMiningSection?.synopsis === 'string' ? selectedStructureMiningSection.synopsis : ''}
+                                  onChange={(event) =>
+                                    updateStructureMiningOnlySectionField(
+                                      pickString(selectedStructureSection, ['sid']),
+                                      'synopsis',
+                                      event.target.value || null,
+                                    )
+                                  }
+                                  className="min-h-[72px] rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[12px] text-aegis-text outline-none resize-y"
+                                />
+                              </label>
+                              <div className="rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                                <div className="flex items-center gap-2">
+                                  <p className="text-[11px] text-aegis-text-dim">Section Content (`chapter_mining.json`)</p>
+                                  <button
+                                    type="button"
+                                    onClick={() => addStructureContentBlock(pickString(selectedStructureSection, ['sid']))}
+                                    className="ml-auto px-2 py-1 text-[10px] rounded-md border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+                                  >
+                                    Add Block
+                                  </button>
+                                </div>
+                                <div className="mt-2 space-y-2">
+                                  {sectionContentBlocks(selectedStructureMiningSection).length === 0 ? (
+                                    <p className="text-[11px] text-aegis-text-dim">No content blocks yet.</p>
+                                  ) : (
+                                    sectionContentBlocks(selectedStructureMiningSection).map((block, blockIndex) => (
+                                      <div key={`content-block-${blockIndex}`} className="rounded-md border border-aegis-border bg-aegis-card p-2 space-y-2">
+                                        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_108px_auto] gap-2">
+                                          <label className="flex flex-col gap-1">
+                                            <span className="text-[10px] text-aegis-text-dim">Type</span>
+                                            <input
+                                              value={pickString(block, ['type']) || 'paragraph'}
+                                              onChange={(event) =>
+                                                updateStructureContentBlock(
+                                                  pickString(selectedStructureSection, ['sid']),
+                                                  blockIndex,
+                                                  'type',
+                                                  event.target.value,
+                                                )
+                                              }
+                                              className="rounded-md border border-aegis-border bg-aegis-elevated px-2 py-1.5 text-[11px] text-aegis-text outline-none"
+                                            />
+                                          </label>
+                                          <label className="flex flex-col gap-1">
+                                            <span className="text-[10px] text-aegis-text-dim">Page</span>
+                                            <input
+                                              type="number"
+                                              value={toNullableNumber(block.page_no) ?? ''}
+                                              onChange={(event) =>
+                                                updateStructureContentBlock(
+                                                  pickString(selectedStructureSection, ['sid']),
+                                                  blockIndex,
+                                                  'page_no',
+                                                  event.target.value ? Number(event.target.value) : null,
+                                                )
+                                              }
+                                              className="rounded-md border border-aegis-border bg-aegis-elevated px-2 py-1.5 text-[11px] text-aegis-text outline-none"
+                                            />
+                                          </label>
+                                          <button
+                                            type="button"
+                                            onClick={() => removeStructureContentBlock(pickString(selectedStructureSection, ['sid']), blockIndex)}
+                                            className="self-end px-2 py-1.5 text-[10px] rounded-md border border-aegis-danger/30 bg-aegis-danger/[0.06] text-aegis-danger hover:bg-aegis-danger/[0.12]"
+                                          >
+                                            Remove Block
+                                          </button>
+                                        </div>
+                                        <label className="flex flex-col gap-1">
+                                          <span className="text-[10px] text-aegis-text-dim">Image URI</span>
+                                          <input
+                                            value={pickString(block, ['uri'])}
+                                            onChange={(event) =>
+                                              updateStructureContentBlock(
+                                                pickString(selectedStructureSection, ['sid']),
+                                                blockIndex,
+                                                'uri',
+                                                event.target.value,
+                                              )
+                                            }
+                                            placeholder="picture_48.png or https://..."
+                                            className="rounded-md border border-aegis-border bg-aegis-elevated px-2 py-1.5 text-[11px] text-aegis-text outline-none"
+                                          />
+                                        </label>
+                                        <textarea
+                                          value={pickString(block, ['text'])}
+                                          onChange={(event) =>
+                                            updateStructureContentBlock(
+                                              pickString(selectedStructureSection, ['sid']),
+                                              blockIndex,
+                                              'text',
+                                              event.target.value,
+                                            )
+                                          }
+                                          className="w-full min-h-[96px] rounded-md border border-aegis-border bg-aegis-elevated px-2 py-2 text-[12px] text-aegis-text outline-none resize-y"
+                                          spellCheck={false}
+                                        />
+                                        {(() => {
+                                          const uri = pickString(block, ['uri']).trim();
+                                          const key = `${pickString(selectedStructureSection, ['sid'])}:${blockIndex}:${uri}`;
+                                          const previewSrc = structureContentImageUrls[key] || '';
+                                          const type = pickString(block, ['type']).toLowerCase();
+                                          const expectsImage = /^(picture|image|figure)$/.test(type) || !!uri;
+                                          if (!expectsImage) return null;
+                                          return (
+                                            <div className="rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                                              <p className="text-[10px] text-aegis-text-dim break-all">
+                                                Source: {uri || 'No image URI set'}
+                                              </p>
+                                              {previewSrc ? (
+                                                <img
+                                                  src={previewSrc}
+                                                  alt={`Section block ${blockIndex + 1}`}
+                                                  className="mt-2 max-h-[220px] rounded-md border border-aegis-border object-contain"
+                                                />
+                                              ) : uri ? (
+                                                <p className="mt-2 text-[10px] text-aegis-text-dim">
+                                                  Preview unavailable for this URI. Keep the URI if it is valid in source artifacts.
+                                                </p>
+                                              ) : null}
+                                            </div>
+                                          );
+                                        })()}
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="rounded-md border border-dashed border-aegis-border p-4 text-[12px] text-aegis-text-dim">
+                              Select a section to refine titles, pages, and mining content.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="h-full flex items-center justify-center text-[12px] text-aegis-text-dim">No structure workspace available.</div>
+                    )}
+                  </div>
+                </div>
+              ) : guidePhaseId === '05_mindmap' ? (
+                <div className="h-full flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={selectedMindmapPath}
+                      onChange={(event) => {
+                        setSelectedMindmapPath(event.target.value);
+                        setMindmapStatus('');
+                        setMindmapImageUploadStatus('');
+                      }}
+                      className="min-w-[240px] rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[12px] text-aegis-text outline-none"
+                    >
+                      {mindmapJsonArtifacts.length === 0 && <option value="">No mindmaps</option>}
+                      {mindmapJsonArtifacts.map((artifact) => (
+                        <option key={artifact.relativePath} value={artifact.relativePath}>
+                          {artifact.relativePath.replace(/^.*\/05_mindmap\//, '')}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={selectedMindmapPreviewPath}
+                      onChange={(event) => setSelectedMindmapPreviewPath(event.target.value)}
+                      className="min-w-[240px] rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[12px] text-aegis-text outline-none"
+                    >
+                      {mindmapHtmlArtifacts.length === 0 && <option value="">No HTML previews</option>}
+                      {mindmapHtmlArtifacts.map((artifact) => (
+                        <option key={artifact.relativePath} value={artifact.relativePath}>
+                          {artifact.relativePath.replace(/^.*\/05_mindmap\//, '')}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => selectedMindmapNodeId && addMindmapChildNode(selectedMindmapNodeId)}
+                      disabled={!selectedMindmapNodeId}
+                      className="px-2.5 py-1.5 text-[12px] rounded-lg border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)] disabled:opacity-50"
+                    >
+                      Add Child
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => selectedMindmapNodeId && addMindmapSiblingNode(selectedMindmapNodeId)}
+                      disabled={!selectedMindmapNodeId || selectedMindmapNodeId === mindmapDraft?.root.id}
+                      className="px-2.5 py-1.5 text-[12px] rounded-lg border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)] disabled:opacity-50"
+                    >
+                      Add Sibling
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => selectedMindmapNodeId && moveMindmapNode(selectedMindmapNodeId, -1)}
+                      disabled={!selectedMindmapNodeId || selectedMindmapNodeId === mindmapDraft?.root.id}
+                      className="px-2.5 py-1.5 text-[12px] rounded-lg border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)] disabled:opacity-50"
+                    >
+                      Move Up
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => selectedMindmapNodeId && moveMindmapNode(selectedMindmapNodeId, 1)}
+                      disabled={!selectedMindmapNodeId || selectedMindmapNodeId === mindmapDraft?.root.id}
+                      className="px-2.5 py-1.5 text-[12px] rounded-lg border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)] disabled:opacity-50"
+                    >
+                      Move Down
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => selectedMindmapNodeId && removeMindmapNode(selectedMindmapNodeId)}
+                      disabled={!selectedMindmapNodeId || selectedMindmapNodeId === mindmapDraft?.root.id}
+                      className="px-2.5 py-1.5 text-[12px] rounded-lg border border-aegis-danger/30 bg-aegis-danger/[0.06] text-aegis-danger hover:bg-aegis-danger/[0.12] disabled:opacity-50"
+                    >
+                      Remove Node
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void saveMindmapWorkspace()}
+                      disabled={!mindmapDirty}
+                      className={clsx(
+                        'ml-auto px-2.5 py-1.5 text-[12px] rounded-lg border',
+                        mindmapDirty
+                          ? 'border-aegis-success/30 bg-aegis-success/[0.08] text-aegis-success hover:bg-aegis-success/[0.14]'
+                          : 'border-aegis-border text-aegis-text-dim opacity-60 cursor-not-allowed',
+                      )}
+                    >
+                      Save Mindmap
+                    </button>
+                  </div>
+                  {mindmapStatus ? <p className="text-[11px] text-aegis-text-dim">{mindmapStatus}</p> : null}
+                  {mindmapError ? <p className="text-[11px] text-aegis-danger">{mindmapError}</p> : null}
+                  <div className="flex-1 min-h-0 rounded-lg border border-aegis-primary/20 bg-aegis-card overflow-hidden">
+                    {mindmapLoading ? (
+                      <div className="h-full flex items-center justify-center text-[12px] text-aegis-text-dim">Loading mindmap workspace...</div>
+                    ) : mindmapDraft ? (
+                      <div className="h-full grid grid-cols-1 xl:grid-cols-[240px_minmax(0,1fr)]">
+                        <div className="border-r border-aegis-border overflow-auto p-2">
+                          <p className="text-[10px] uppercase tracking-[0.04em] text-aegis-text-dim">Node Tree</p>
+                          <div className="mt-2 space-y-1">
+                            {flattenedMindmapNodes.map((node) => (
+                              <button
+                                key={node.id}
+                                type="button"
+                                onClick={() => setSelectedMindmapNodeId(node.id)}
+                                className={clsx(
+                                  'w-full rounded-md border px-2 py-1.5 text-left',
+                                  node.id === selectedMindmapNodeId
+                                    ? 'border-aegis-primary/40 bg-aegis-primary/[0.10] text-aegis-primary'
+                                    : 'border-aegis-border bg-aegis-card text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]',
+                                )}
+                                style={{ paddingLeft: `${8 + node.depth * 16}px` }}
+                              >
+                                <p className="text-[11px] font-medium">{node.label}</p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="overflow-auto p-3 space-y-3">
+                          {selectedMindmapNode ? (
+                            <>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                <label className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                                  <span className="text-[11px] text-aegis-text-dim">Label</span>
+                                  <input
+                                    value={selectedMindmapNode.label}
+                                    onChange={(event) => updateMindmapNodeDraft(selectedMindmapNode.id, (node) => ({ ...node, label: event.target.value }))}
+                                    className="rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[12px] text-aegis-text outline-none"
+                                  />
+                                </label>
+                                <label className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                                  <span className="text-[11px] text-aegis-text-dim">Kind</span>
+                                  <input
+                                    value={selectedMindmapNode.kind}
+                                    onChange={(event) => updateMindmapNodeDraft(selectedMindmapNode.id, (node) => ({ ...node, kind: event.target.value }))}
+                                    className="rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[12px] text-aegis-text outline-none"
+                                  />
+                                </label>
+                              </div>
+                              <label className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                                <span className="text-[11px] text-aegis-text-dim">Description</span>
+                                <textarea
+                                  value={selectedMindmapNode.description || ''}
+                                  onChange={(event) =>
+                                    updateMindmapNodeDraft(selectedMindmapNode.id, (node) => ({
+                                      ...node,
+                                      description: event.target.value || null,
+                                    }))
+                                  }
+                                  className="min-h-[120px] rounded-md border border-aegis-border bg-aegis-card px-2 py-2 text-[12px] text-aegis-text outline-none resize-y"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                                <span className="text-[11px] text-aegis-text-dim">Note</span>
+                                <textarea
+                                  value={selectedMindmapNode.note || ''}
+                                  onChange={(event) =>
+                                    updateMindmapNodeDraft(selectedMindmapNode.id, (node) => ({
+                                      ...node,
+                                      note: event.target.value || null,
+                                    }))
+                                  }
+                                  className="min-h-[80px] rounded-md border border-aegis-border bg-aegis-card px-2 py-2 text-[12px] text-aegis-text outline-none resize-y"
+                                />
+                              </label>
+                              <div className="rounded-md border border-aegis-border bg-aegis-elevated p-2 space-y-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="text-[11px] text-aegis-text-dim">Node Visual</p>
+                                  <label className="ml-auto px-2 py-1 text-[10px] rounded-md border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)] cursor-pointer">
+                                    Upload Image
+                                    <input
+                                      type="file"
+                                      accept="image/png,image/jpeg,image/webp,image/gif,image/bmp"
+                                      className="hidden"
+                                      onChange={(event) => {
+                                        void handleMindmapImageUpload(event.target.files?.[0] || null);
+                                        event.currentTarget.value = '';
+                                      }}
+                                    />
+                                  </label>
+                                  <button
+                                    type="button"
+                                    onClick={clearMindmapNodeImage}
+                                    className="px-2 py-1 text-[10px] rounded-md border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+                                  >
+                                    Clear Image
+                                  </button>
+                                </div>
+                                {mindmapNodeImageUrl ? (
+                                  <img src={mindmapNodeImageUrl} alt={selectedMindmapNode.label} className="max-h-[180px] rounded-md border border-aegis-border object-contain" />
+                                ) : (
+                                  <p className="text-[11px] text-aegis-text-dim">No image attached to this node.</p>
+                                )}
+                                {mindmapImageUploadStatus ? <p className="text-[11px] text-aegis-text-dim">{mindmapImageUploadStatus}</p> : null}
+                                <label className="flex flex-col gap-1">
+                                  <span className="text-[11px] text-aegis-text-dim">Visual Prompt</span>
+                                  <textarea
+                                    value={typeof selectedMindmapNode.visual_meta?.prompt === 'string' ? selectedMindmapNode.visual_meta.prompt : ''}
+                                    onChange={(event) =>
+                                      updateMindmapNodeDraft(selectedMindmapNode.id, (node) => ({
+                                        ...node,
+                                        visual_meta: {
+                                          ...(node.visual_meta || {}),
+                                          prompt: event.target.value,
+                                        },
+                                      }))
+                                    }
+                                    className="min-h-[84px] rounded-md border border-aegis-border bg-aegis-card px-2 py-2 text-[12px] text-aegis-text outline-none resize-y"
+                                  />
+                                </label>
+                              </div>
+                              <div className="rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="text-[11px] text-aegis-text-dim">Mindmap HTML Preview</p>
+                                  {selectedMindmapPreviewPath ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => void openMindmapPreviewWindow()}
+                                      disabled={mindmapPreviewLoading}
+                                      className={clsx(
+                                        'px-2 py-1 text-[10px] rounded-md border',
+                                        mindmapPreviewLoading
+                                          ? 'border-aegis-border text-aegis-text-dim opacity-60 cursor-not-allowed'
+                                          : 'border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]',
+                                      )}
+                                    >
+                                      {mindmapPreviewLoading ? 'Loading...' : 'Open Preview Window'}
+                                    </button>
+                                  ) : null}
+                                  {selectedMindmapPreviewPath ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedArtifactPath(selectedMindmapPreviewPath);
+                                        setArtifactStatus('');
+                                      }}
+                                      className="ml-auto px-2 py-1 text-[10px] rounded-md border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+                                    >
+                                      Open Raw
+                                    </button>
+                                  ) : null}
+                                </div>
+                                {selectedMindmapPreviewPath ? (
+                                  <p className="mt-1 text-[10px] text-aegis-text-dim break-all">
+                                    {selectedMindmapPreviewPath.replace(/^.*\/05_mindmap\//, '')}
+                                  </p>
+                                ) : null}
+                                <div className="mt-2 min-h-[220px] rounded-md border border-aegis-border bg-white overflow-hidden">
+                                  {mindmapPreviewLoading ? (
+                                    <div className="h-[220px] flex items-center justify-center text-[11px] text-aegis-text-dim">
+                                      Loading HTML preview...
+                                    </div>
+                                  ) : mindmapPreviewError ? (
+                                    <div className="h-[220px] flex items-center justify-center px-3 text-[11px] text-aegis-danger text-center">
+                                      {mindmapPreviewError}
+                                    </div>
+                                  ) : mindmapPreviewHtml ? (
+                                    <iframe
+                                      title="mindmap-html-preview"
+                                      srcDoc={mindmapPreviewHtml}
+                                      sandbox="allow-same-origin allow-scripts"
+                                      className="h-[360px] w-full border-0"
+                                    />
+                                  ) : (
+                                    <div className="h-[220px] flex items-center justify-center px-3 text-[11px] text-aegis-text-dim text-center">
+                                      No HTML preview file selected for this mindmap.
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="rounded-md border border-dashed border-aegis-border p-4 text-[12px] text-aegis-text-dim">
+                              Select a node to edit its content and visuals.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="h-full flex items-center justify-center text-[12px] text-aegis-text-dim">No mindmap workspace available.</div>
+                    )}
+                  </div>
+                </div>
+              ) : guidePhaseId === '06_assessment' ? (
+                <div className="h-full flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={selectedAssessmentPath}
+                      onChange={(event) => {
+                        setSelectedAssessmentPath(event.target.value);
+                        setAssessmentStatus('');
+                      }}
+                      className="min-w-[240px] rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[12px] text-aegis-text outline-none"
+                    >
+                      {assessmentJsonArtifacts.length === 0 && <option value="">No assessment files</option>}
+                      {assessmentJsonArtifacts.map((artifact) => (
+                        <option key={artifact.relativePath} value={artifact.relativePath}>
+                          {artifact.relativePath.replace(/^.*\/06_assessment\//, '')}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => void saveAssessmentWorkspace()}
+                      disabled={!assessmentDirty}
+                      className={clsx(
+                        'ml-auto px-2.5 py-1.5 text-[12px] rounded-lg border',
+                        assessmentDirty
+                          ? 'border-aegis-success/30 bg-aegis-success/[0.08] text-aegis-success hover:bg-aegis-success/[0.14]'
+                          : 'border-aegis-border text-aegis-text-dim opacity-60 cursor-not-allowed',
+                      )}
+                    >
+                      Save Assessment
+                    </button>
+                  </div>
+                  {assessmentStatus ? <p className="text-[11px] text-aegis-text-dim">{assessmentStatus}</p> : null}
+                  {assessmentError ? <p className="text-[11px] text-aegis-danger">{assessmentError}</p> : null}
+                  <div className="flex-1 min-h-0 rounded-lg border border-aegis-primary/20 bg-aegis-card overflow-hidden">
+                    {assessmentLoading ? (
+                      <div className="h-full flex items-center justify-center text-[12px] text-aegis-text-dim">Loading assessment workspace...</div>
+                    ) : (
+                      <div className="h-full grid grid-cols-1 xl:grid-cols-[240px_minmax(0,1fr)]">
+                        <div className="border-r border-aegis-border overflow-auto p-2">
+                          <p className="text-[10px] uppercase tracking-[0.04em] text-aegis-text-dim">Questions</p>
+                          <div className="mt-2 space-y-1">
+                            {assessmentDraft.map((item, index) => {
+                              const form = asRecord(item.form);
+                              const qid = pickString(item, ['qid']) || `Q${index + 1}`;
+                              const preview = pickString(form || {}, ['question']).replace(/\s+/g, ' ').slice(0, 80);
+                              return (
+                                <button
+                                  key={`assessment-${qid}-${index}`}
+                                  type="button"
+                                  onClick={() => setSelectedAssessmentIndex(index)}
+                                  className={clsx(
+                                    'w-full rounded-md border px-2 py-2 text-left',
+                                    index === selectedAssessmentIndex
+                                      ? 'border-aegis-primary/40 bg-aegis-primary/[0.10]'
+                                      : 'border-aegis-border bg-aegis-card hover:bg-[rgb(var(--aegis-overlay)/0.04)]',
+                                  )}
+                                >
+                                  <p className={clsx('text-[11px] font-medium', index === selectedAssessmentIndex ? 'text-aegis-primary' : 'text-aegis-text')}>
+                                    {qid}
+                                  </p>
+                                  <p className="mt-0.5 text-[10px] text-aegis-text-dim line-clamp-2">{preview || 'Untitled question'}</p>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        <div className="overflow-auto p-3 space-y-3">
+                          {selectedAssessmentItem && selectedAssessmentForm ? (
+                            <>
+                              <label className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                                <span className="text-[11px] text-aegis-text-dim">Question</span>
+                                <textarea
+                                  value={pickString(selectedAssessmentForm, ['question'])}
+                                  onChange={(event) =>
+                                    updateAssessmentItem(selectedAssessmentIndex, (item) => ({
+                                      ...item,
+                                      form: {
+                                        ...(asRecord(item.form) || {}),
+                                        question: event.target.value,
+                                      },
+                                    }))
+                                  }
+                                  className="min-h-[120px] rounded-md border border-aegis-border bg-aegis-card px-2 py-2 text-[12px] text-aegis-text outline-none resize-y"
+                                />
+                              </label>
+                              <div className="rounded-md border border-aegis-border bg-aegis-elevated p-2 space-y-2">
+                                <p className="text-[11px] text-aegis-text-dim">Options</p>
+                                {selectedAssessmentOptions.map((option, optionIndex) => (
+                                  <div key={`assessment-option-${optionIndex}`} className="grid grid-cols-[72px_minmax(0,1fr)] gap-2">
+                                    <input
+                                      value={pickString(option, ['label'])}
+                                      onChange={(event) =>
+                                        updateAssessmentItem(selectedAssessmentIndex, (item) => {
+                                          const form = asRecord(item.form) || {};
+                                          const options = (Array.isArray(form.options) ? form.options : []).map((row) => asRecord(row) || {});
+                                          options[optionIndex] = { ...options[optionIndex], label: event.target.value };
+                                          return { ...item, form: { ...form, options } };
+                                        })
+                                      }
+                                      className="rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[12px] text-aegis-text outline-none"
+                                    />
+                                    <textarea
+                                      value={pickString(option, ['text'])}
+                                      onChange={(event) =>
+                                        updateAssessmentItem(selectedAssessmentIndex, (item) => {
+                                          const form = asRecord(item.form) || {};
+                                          const options = (Array.isArray(form.options) ? form.options : []).map((row) => asRecord(row) || {});
+                                          options[optionIndex] = { ...options[optionIndex], text: event.target.value };
+                                          return { ...item, form: { ...form, options } };
+                                        })
+                                      }
+                                      className="min-h-[70px] rounded-md border border-aegis-border bg-aegis-card px-2 py-2 text-[12px] text-aegis-text outline-none resize-y"
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                <label className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                                  <span className="text-[11px] text-aegis-text-dim">Correct Option(s)</span>
+                                  <input
+                                    value={(Array.isArray(selectedAssessmentForm.correct_option) ? selectedAssessmentForm.correct_option : []).map((item) => String(item)).join(', ')}
+                                    onChange={(event) =>
+                                      updateAssessmentItem(selectedAssessmentIndex, (item) => ({
+                                        ...item,
+                                        form: {
+                                          ...(asRecord(item.form) || {}),
+                                          correct_option: event.target.value
+                                            .split(',')
+                                            .map((part) => part.trim())
+                                            .filter(Boolean),
+                                        },
+                                      }))
+                                    }
+                                    className="rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[12px] text-aegis-text outline-none"
+                                  />
+                                </label>
+                                <label className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                                  <span className="text-[11px] text-aegis-text-dim">Reasoning</span>
+                                  <textarea
+                                    value={pickString(selectedAssessmentForm, ['reasoning'])}
+                                    onChange={(event) =>
+                                      updateAssessmentItem(selectedAssessmentIndex, (item) => ({
+                                        ...item,
+                                        form: {
+                                          ...(asRecord(item.form) || {}),
+                                          reasoning: event.target.value,
+                                        },
+                                      }))
+                                    }
+                                    className="min-h-[96px] rounded-md border border-aegis-border bg-aegis-card px-2 py-2 text-[12px] text-aegis-text outline-none resize-y"
+                                  />
+                                </label>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="rounded-md border border-dashed border-aegis-border p-4 text-[12px] text-aegis-text-dim">
+                              No assessment question selected.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : guidePhaseId === '07_slide' ? (
+                <div className="h-full min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(340px,0.9fr)_minmax(0,1.1fr)] gap-3">
+                  <div className="min-h-0 flex flex-col gap-3 overflow-y-auto pr-1">
+                    <div className="rounded-md border border-aegis-primary/25 bg-aegis-primary/[0.08] p-2.5 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <p className="text-[11px] text-aegis-text-dim">Slide Context</p>
+                        <span className="ml-auto text-[10px] text-aegis-text-dim">
+                          {selectedSlideDesignEntry?.slideId || 'No slide selected'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[10px] text-aegis-text-dim">Chapter</span>
+                          <select
+                            value={slideChapterId}
+                            onChange={(event) => {
+                              setSlideChapterId(event.target.value);
+                              setSlideSectionId('');
+                              setSlideItemId('');
+                              setSlideDesignStatus('');
+                            }}
+                            className="w-full rounded-md border border-aegis-border bg-aegis-elevated px-2 py-1.5 text-[11px] text-aegis-text outline-none"
+                          >
+                            {slideChapterOptions.length === 0 && <option value="">No chapters</option>}
+                            {slideChapterOptions.map((chapterId) => (
+                              <option key={`slide-chapter-${chapterId}`} value={chapterId}>
+                                {chapterId}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[10px] text-aegis-text-dim">Section</span>
+                          <select
+                            value={slideSectionId}
+                            onChange={(event) => {
+                              setSlideSectionId(event.target.value);
+                              setSlideItemId('');
+                              setSlideDesignStatus('');
+                            }}
+                            className="w-full rounded-md border border-aegis-border bg-aegis-elevated px-2 py-1.5 text-[11px] text-aegis-text outline-none"
+                          >
+                            {slideSectionOptions.length === 0 && <option value="">No sections</option>}
+                            {slideSectionOptions.map((sectionId) => (
+                              <option key={`slide-section-${sectionId}`} value={sectionId}>
+                                {sectionId}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="sm:col-span-2 flex flex-col gap-1">
+                          <span className="text-[10px] text-aegis-text-dim">Slide</span>
+                          <select
+                            value={selectedSlideDesignPath}
+                            onChange={(event) => {
+                              setSelectedSlideDesignPath(event.target.value);
+                              setSlideDesignStatus('');
+                            }}
+                            className="w-full rounded-md border border-aegis-border bg-aegis-elevated px-2 py-1.5 text-[11px] text-aegis-text outline-none"
+                          >
+                            {filteredSlideEntries.length === 0 && <option value="">No slides in selected chapter/section</option>}
+                            {filteredSlideEntries.map((entry) => (
+                              <option key={entry.relativePath} value={entry.relativePath}>
+                                {entry.slideId} · {entry.relativePath.replace(/^.*\/07_slide\//, '')}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="sm:col-span-2 flex flex-col gap-1">
+                          <span className="text-[10px] text-aegis-text-dim">docId (optional)</span>
+                          <input
+                            value={slideDocId}
+                            onChange={(event) => setSlideDocId(event.target.value)}
+                            placeholder="Auto from milestone; override if needed"
+                            className="w-full rounded-md border border-aegis-border bg-aegis-elevated px-2 py-1.5 text-[11px] text-aegis-text outline-none"
+                          />
+                        </label>
+                      </div>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] text-aegis-text-dim">Revision note (optional)</span>
+                        <input
+                          value={slideRevisionNote}
+                          onChange={(event) => setSlideRevisionNote(event.target.value)}
+                          placeholder="What should be changed for this selected slide?"
+                          className="w-full rounded-md border border-aegis-border bg-aegis-elevated px-2 py-1.5 text-[11px] text-aegis-text outline-none"
+                        />
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void regenerateSlide()}
+                          disabled={!slideActionEnabled || stepRunActive}
+                          className={clsx(
+                            'px-2.5 py-1.5 text-[11px] rounded-md text-white',
+                            slideActionEnabled && !stepRunActive
+                              ? 'bg-aegis-primary shadow-[0_0_0_1px_rgba(var(--aegis-primary),0.35)] hover:opacity-90'
+                              : 'bg-aegis-text-dim opacity-60 cursor-not-allowed',
+                          )}
+                        >
+                          {stepRunActive && regenStatus.mode === 'slide' ? 'Running Slide...' : 'Regenerate Selected Slide'}
+                        </button>
+                        <span className="text-[10px] text-aegis-text-dim">
+                          {slideChapterId && slideSectionId && slideItemId ? `${slideChapterId} / ${slideSectionId} / ${slideItemId}` : 'Select chapter, section, and slide first'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {currentSlidePreviewArtifact ? (
+                      <div className="rounded-lg border border-aegis-border bg-aegis-elevated p-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[10px] uppercase tracking-[0.04em] text-aegis-text-dim">Slide Preview</p>
+                          <p className="text-[10px] text-aegis-text-dim truncate">{currentSlidePreviewArtifact.name}</p>
+                        </div>
+                        <div className="mt-2 h-[360px] xl:h-[460px] rounded-md border border-aegis-border bg-aegis-card p-2 overflow-x-auto overflow-y-auto">
+                          {slidePreviewLoading ? (
+                            <p className="h-full flex items-center justify-center text-[12px] text-aegis-text-dim">Loading preview image...</p>
+                          ) : slidePreviewImageUrl ? (
+                            <img src={slidePreviewImageUrl} alt={currentSlidePreviewArtifact.name || 'slide preview'} className="max-w-full h-auto rounded-md mx-auto" />
+                          ) : (
+                            <p className="h-full flex items-center justify-center text-[12px] text-aegis-danger text-center">
+                              {slidePreviewError || 'Preview image is unavailable for this slide.'}
+                            </p>
+                          )}
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (slidePreviewImageUrl) {
+                                const previewTitle = currentSlidePreviewArtifact.name || 'slide-preview';
+                                void (async () => {
+                                  try {
+                                    const result = await window.aegis?.artifact?.open?.({
+                                      type: 'image',
+                                      title: previewTitle,
+                                      content: slidePreviewImageUrl,
+                                    });
+                                    if (!result?.success) {
+                                      window.open(slidePreviewImageUrl, '_blank', 'noopener,noreferrer');
+                                    }
+                                  } catch {
+                                    window.open(slidePreviewImageUrl, '_blank', 'noopener,noreferrer');
+                                  }
+                                })();
+                                return;
+                              }
+                              setSlidePreviewError('Preview image is unavailable for this slide.');
+                            }}
+                            disabled={slidePreviewLoading}
+                            className={clsx(
+                              'px-2.5 py-1.5 text-[12px] rounded-lg border',
+                              slidePreviewLoading
+                                ? 'border-aegis-border text-aegis-text-dim opacity-60 cursor-not-allowed'
+                                : 'border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]',
+                            )}
+                          >
+                            {slidePreviewLoading ? 'Loading Preview...' : 'Open Preview Image'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedArtifactPath(currentSlidePreviewArtifact.relativePath);
+                              setArtifactStatus('');
+                            }}
+                            className="px-2.5 py-1.5 text-[12px] rounded-lg border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+                          >
+                            Open in Advanced Files
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-aegis-text-dim">No preview image found for the selected slide design.</p>
+                    )}
+                  </div>
+
+                  <div className="min-h-0 flex flex-col gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="min-w-[240px] flex-1 rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5">
+                        <p className="text-[10px] uppercase tracking-[0.04em] text-aegis-text-dim">Editing JSON</p>
+                        <p className="mt-0.5 text-[11px] text-aegis-text break-all">
+                          {selectedSlideDesignPath ? selectedSlideDesignPath.replace(/^.*\/07_slide\//, '') : 'No slide selected'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void saveSlideDesignWorkspace()}
+                        disabled={!slideDesignDirty}
+                        className={clsx(
+                          'px-2.5 py-1.5 text-[12px] rounded-lg border',
+                          slideDesignDirty
+                            ? 'border-aegis-success/30 bg-aegis-success/[0.08] text-aegis-success hover:bg-aegis-success/[0.14]'
+                            : 'border-aegis-border text-aegis-text-dim opacity-60 cursor-not-allowed',
+                        )}
+                      >
+                        Save Slide Design
+                      </button>
+                    </div>
+                    {slideDesignStatus ? <p className="text-[11px] text-aegis-text-dim">{slideDesignStatus}</p> : null}
+                    {slideDesignError ? <p className="text-[11px] text-aegis-danger">{slideDesignError}</p> : null}
+                    <div className="flex-1 min-h-0 rounded-lg border border-aegis-primary/20 bg-aegis-card overflow-auto p-3 space-y-3">
+                      {slideDesignLoading ? (
+                        <div className="h-full flex items-center justify-center text-[12px] text-aegis-text-dim">Loading slide workspace...</div>
+                      ) : slideDesignDraft ? (
+                        <>
+                          <label className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                            <span className="text-[11px] text-aegis-text-dim">Layout Template</span>
+                            <textarea
+                              value={pickString(slideDesignDraft, ['layout_template', 'layoutTemplate'])}
+                              onChange={(event) => {
+                                setSlideDesignDraft((prev) => (prev ? { ...prev, layout_template: event.target.value } : prev));
+                                setSlideDesignDirty(true);
+                                setSlideDesignStatus('');
+                              }}
+                              className="min-h-[120px] rounded-md border border-aegis-border bg-aegis-card px-2 py-2 text-[12px] text-aegis-text outline-none resize-y"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1 rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                            <span className="text-[11px] text-aegis-text-dim">Visual Prompt</span>
+                            <textarea
+                              value={pickString(slideDesignDraft, ['visual_prompt', 'visualPrompt'])}
+                              onChange={(event) => {
+                                setSlideDesignDraft((prev) => (prev ? { ...prev, visual_prompt: event.target.value } : prev));
+                                setSlideDesignDirty(true);
+                                setSlideDesignStatus('');
+                              }}
+                              className="min-h-[380px] rounded-md border border-aegis-border bg-aegis-card px-2 py-2 text-[12px] text-aegis-text outline-none resize-y"
+                            />
+                          </label>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            <div className="rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                              <p className="text-[11px] text-aegis-text-dim">Status</p>
+                              <p className="mt-1 text-[12px] text-aegis-text">{pickString(slideDesignDraft, ['status']) || 'unknown'}</p>
+                            </div>
+                            <div className="rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                              <p className="text-[11px] text-aegis-text-dim">Error</p>
+                              <p className="mt-1 text-[12px] text-aegis-text">{pickString(slideDesignDraft, ['error']) || 'None'}</p>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-[12px] text-aegis-text-dim">No slide design selected.</div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ) : (
-                <div className="h-full flex items-center justify-center text-[12px] text-aegis-text-dim">
-                  Select a generated file to view or edit.
+                <div className="h-full flex flex-col gap-3">
+                  <div className="rounded-lg border border-aegis-primary/20 bg-aegis-card p-3">
+                    <p className="text-[12px] text-aegis-text">
+                      {guidePhaseId === '05_mindmap'
+                        ? 'Mindmap authoring is available above.'
+                        : 'This phase does not expose a structured editor yet. Use the advanced files panel for direct review.'}
+                    </p>
+                  </div>
                 </div>
               )}
+            </div>
+
+            <div className="mt-3 shrink-0 space-y-3 overflow-hidden">
+              {regenStatus.logTail && (
+                <details className="rounded border border-aegis-accent/25 bg-aegis-accent/[0.06] px-2 py-1">
+                  <summary className="text-[11px] text-aegis-text-dim cursor-pointer">Run log</summary>
+                  <pre className="mt-2 max-h-[120px] overflow-auto text-[11px] text-aegis-text whitespace-pre-wrap">{regenStatus.logTail}</pre>
+                </details>
+              )}
+
+              <details className="rounded-lg border border-aegis-border bg-aegis-card p-2 min-h-0 overflow-hidden">
+                <summary className="cursor-pointer text-[12px] text-aegis-text-dim">Advanced Files</summary>
+                <div className="mt-3 space-y-3 max-h-[280px] xl:max-h-[340px] 2xl:max-h-[400px] overflow-y-auto pr-1">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <div className="rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                    <p className="text-[10px] uppercase tracking-[0.04em] text-aegis-text-dim">Editable</p>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {editablePhaseArtifacts.length === 0 ? (
+                        <p className="text-[11px] text-aegis-text-dim">None</p>
+                      ) : (
+                        editablePhaseArtifacts.map((artifact) => (
+                          <button
+                            key={artifact.relativePath}
+                            type="button"
+                            onClick={() => {
+                              setSelectedArtifactPath(artifact.relativePath);
+                              setArtifactStatus('');
+                            }}
+                            className="px-2 py-1 text-[10px] rounded-md border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+                          >
+                            {artifact.name}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  <div className="rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                    <p className="text-[10px] uppercase tracking-[0.04em] text-aegis-text-dim">Images</p>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {imagePhaseArtifacts.length === 0 ? (
+                        <p className="text-[11px] text-aegis-text-dim">None</p>
+                      ) : (
+                        imagePhaseArtifacts.map((artifact) => (
+                          <button
+                            key={artifact.relativePath}
+                            type="button"
+                            onClick={() => {
+                              setSelectedArtifactPath(artifact.relativePath);
+                              setArtifactStatus('');
+                            }}
+                            className="px-2 py-1 text-[10px] rounded-md border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+                          >
+                            {artifact.name}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  <div className="rounded-md border border-aegis-border bg-aegis-elevated p-2">
+                    <p className="text-[10px] uppercase tracking-[0.04em] text-aegis-text-dim">Read-only</p>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {readOnlyPhaseArtifacts.length === 0 ? (
+                        <p className="text-[11px] text-aegis-text-dim">None</p>
+                      ) : (
+                        readOnlyPhaseArtifacts.map((artifact) => (
+                          <button
+                            key={artifact.relativePath}
+                            type="button"
+                            onClick={() => {
+                              setSelectedArtifactPath(artifact.relativePath);
+                              setArtifactStatus('');
+                            }}
+                            className="px-2 py-1 text-[10px] rounded-md border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+                          >
+                            {artifact.name}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {selectedArtifact && (
+                  <p className="text-[11px] text-aegis-text-dim break-all">{selectedArtifact.relativePath}</p>
+                )}
+                {selectedArtifact && !selectedArtifact.editable && (
+                  <p className="text-[11px] text-aegis-warning">This artifact is read-only.</p>
+                )}
+                {artifactStatus && <p className="text-[11px] text-aegis-text-dim">{artifactStatus}</p>}
+
+                <div className="rounded-lg border border-aegis-primary/20 bg-aegis-elevated overflow-hidden">
+                  <div className="flex flex-wrap items-center gap-2 border-b border-aegis-border px-2 py-1.5">
+                    <span className="text-[11px] text-aegis-text-dim">Raw Preview</span>
+                    <button
+                      type="button"
+                      onClick={() => void saveArtifact()}
+                      disabled={!artifactDirty || !(artifactKind === 'json' || artifactKind === 'text') || !selectedArtifact?.editable}
+                      className={clsx(
+                        'ml-auto px-2 py-1 text-[10px] rounded-md border',
+                        !artifactDirty || !(artifactKind === 'json' || artifactKind === 'text') || !selectedArtifact?.editable
+                          ? 'border-aegis-border text-aegis-text-dim opacity-60 cursor-not-allowed'
+                          : 'border-aegis-success/30 bg-aegis-success/[0.08] text-aegis-success hover:bg-aegis-success/[0.14]',
+                      )}
+                    >
+                      Save Raw File
+                    </button>
+                  </div>
+                  <div className="min-h-[220px] max-h-[360px] overflow-auto">
+                    {artifactReadLoading ? (
+                      <div className="h-[220px] flex items-center justify-center text-[12px] text-aegis-text-dim">Loading file...</div>
+                    ) : artifactKind === 'image' && artifactDataUrl ? (
+                      <div className="p-2">
+                        <img src={artifactDataUrl} alt={selectedArtifact?.name || 'artifact'} className="max-w-full h-auto rounded-md" />
+                      </div>
+                    ) : artifactKind === 'json' || artifactKind === 'text' ? (
+                      <textarea
+                        value={artifactText}
+                        onChange={(event) => {
+                          if (!selectedArtifact?.editable) return;
+                          setArtifactText(event.target.value);
+                          setArtifactDirty(true);
+                          setArtifactStatus('');
+                        }}
+                        readOnly={!selectedArtifact?.editable}
+                        className="w-full min-h-[220px] bg-transparent p-3 text-[12px] text-aegis-text font-mono resize-y outline-none"
+                        spellCheck={false}
+                      />
+                    ) : selectedArtifactPath ? (
+                      <div className="h-[220px] flex items-center justify-center text-[12px] text-aegis-text-dim">
+                        {artifactMime ? `Preview not available (${artifactMime})` : 'Preview not available'}
+                      </div>
+                    ) : (
+                      <div className="h-[220px] flex items-center justify-center text-[12px] text-aegis-text-dim">
+                        Select a phase file to preview.
+                      </div>
+                    )}
+                  </div>
+                </div>
+                </div>
+              </details>
             </div>
           </div>
         </div>

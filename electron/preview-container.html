@@ -592,6 +592,20 @@
           container.appendChild(svgDiv);
           break;
 
+        case 'image':
+          var imageDiv = document.createElement('div');
+          imageDiv.style.cssText = 'width:100%;height:100%;overflow:auto;padding:20px;background:#0d1117;display:flex;align-items:flex-start;justify-content:center';
+          var image = document.createElement('img');
+          image.src = content;
+          image.alt = currentArtifact && currentArtifact.title ? currentArtifact.title : 'image';
+          image.style.cssText = 'max-width:100%;height:auto;border-radius:8px;box-shadow:0 0 0 1px rgba(255,255,255,0.08)';
+          image.onerror = function() {
+            imageDiv.innerHTML = '<div style="margin:auto;color:#ff6b6b;font-size:12px">Failed to load image preview.</div>';
+          };
+          imageDiv.appendChild(image);
+          container.appendChild(imageDiv);
+          break;
+
         case 'mermaid':
           var mermaidHtml = '<!DOCTYPE html><html><head>'
             + '<meta charset="UTF-8">'

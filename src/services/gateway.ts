@@ -757,8 +757,16 @@ class GatewayService {
     return this.request('usage.cost', { days });
   }
 
+  async getOntoSynthCostSummary(days = 30): Promise<any> {
+    return this.request('ontosynth.usage.cost', { days });
+  }
+
   async getSessionsUsage(params: { limit?: number; startDate?: string; endDate?: string; key?: string } = {}): Promise<any> {
     return this.request('sessions.usage', { limit: 50, ...params });
+  }
+
+  async getOntoSynthUsage(params: { days?: number; startDate?: string; endDate?: string } = {}): Promise<any> {
+    return this.request('ontosynth.usage.breakdown', params);
   }
 
   async getSessionTimeseries(key: string): Promise<any> {

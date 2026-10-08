@@ -11,10 +11,13 @@ import {
   Clock, Bot, Settings, Brain, Puzzle,
   ListChecks,
   Network,
+  Activity,
   Terminal,
   Globe,
   Database,
+  FilePenLine,
   SquareStack,
+  Megaphone,
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getDirection } from '@/i18n';
@@ -39,7 +42,10 @@ const navItems: NavItem[] = [
   { to: '/skills', icon: Puzzle, labelKey: 'nav.skills' },
   { to: '/aella', icon: Globe, labelKey: 'nav.aella' },
   { to: '/knowledge', icon: Database, labelKey: 'nav.knowledge' },
+  { to: '/documents', icon: FilePenLine, labelKey: 'nav.documents' },
+  { to: '/llm-gateway', icon: Activity, labelKey: 'nav.llmGateway' },
   { to: '/creation', icon: SquareStack, labelKey: 'nav.creation' },
+  { to: '/social', icon: Megaphone, labelKey: 'nav.social' },
   { to: '/terminal', icon: Terminal, labelKey: 'nav.terminal' },
   { to: '/memory', icon: Brain, labelKey: 'nav.memory', badge: '🧪' },
 ];
@@ -56,13 +62,14 @@ export function NavSidebar() {
   return (
     <div
       className={clsx(
-        'w-[64px] shrink-0 flex flex-col items-center',
+        'w-[64px] shrink-0 h-full min-h-0 flex flex-col items-center overflow-hidden',
         'chrome-bg', borderClass, 'border-aegis-border',
         'py-3 relative'
       )}
     >
       {/* Navigation Icons */}
-      <nav className="flex-1 flex flex-col items-center gap-1">
+      <nav className="flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden">
+        <div className="flex min-h-full flex-col items-center gap-1 pb-2">
         {navItems.map((item) => {
           const isActive = location.pathname === item.to ||
             (item.to !== '/' && location.pathname.startsWith(item.to));
@@ -120,10 +127,11 @@ export function NavSidebar() {
             </NavLink>
           );
         })}
+        </div>
       </nav>
 
       {/* Bottom: Settings */}
-      <div className="pt-3">
+      <div className="shrink-0 pt-3">
         <NavLink
           to="/settings"
           aria-current={location.pathname === '/settings' ? 'page' : undefined}

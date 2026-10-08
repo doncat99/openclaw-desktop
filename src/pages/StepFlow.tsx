@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { CircleHelp, RefreshCw } from 'lucide-react';
+import { CircleHelp, ExternalLink, RefreshCw } from 'lucide-react';
 import clsx from 'clsx';
 import { PageTransition } from '@/components/shared/PageTransition';
 import { gateway } from '@/services/gateway';
@@ -189,6 +190,41 @@ type FlattenedMindmapNode = {
   parentId: string | null;
 };
 type AssessmentDraftItem = Record<string, unknown>;
+type VideoTutorialStepId =
+  | 'story_setup'
+  | 'scene_design'
+  | 'shot_prompting'
+  | 'audio_motion'
+  | 'run_qa';
+type VideoTutorialStepDefinition = {
+  id: VideoTutorialStepId;
+  title: string;
+  objective: string;
+};
+type VideoTutorialStepState = {
+  passed: boolean;
+  scoreLabel: string;
+  checks: string[];
+  blockers: string[];
+};
+type VideoGenerationMode = 'group' | 'single';
+type VideoGroupingStrategy = 'balanced' | 'compact';
+type VideoGroupCalibration = {
+  status: 'idle' | 'calibrated' | 'failed';
+  notes: string[];
+  checkedAt: number | null;
+};
+type VideoGenerationTargetState = {
+  status: 'idle' | 'running' | 'success' | 'error';
+  message: string;
+  updatedAt: number | null;
+};
+type VideoTextTemplate = {
+  id: string;
+  label: string;
+  value: string;
+  hint: string;
+};
 
 const SAMPLE_FLOW_JSON = `{
   "title": "Course Creation Workflow",
@@ -251,7 +287,8 @@ const PIPELINE_PHASE_TEMPLATES: ReadonlyArray<{ id: string; title: string; patte
   { id: '09_video', title: 'Video', patterns: [/video/i, /phase\s*9/i] },
   { id: '10_learning', title: 'Learning Intelligence', patterns: [/learning/i, /intelligence/i, /phase\s*10/i] },
 ];
-const REQUIRED_WORKFLOW_PHASE_IDS = ['02_structure', '05_mindmap', '06_assessment', '07_slide'] as const;
+const REQUIRED_WORKFLOW_PHASE_IDS = ['02_structure', '05_mindmap', '06_assessment', '07_slide', '09_video'] as const;
+const CREATE_LOCKED_PHASE_IDS = new Set<string>(['09_video']);
 const WORKFLOW_STEP_COPY: Record<string, { title: string; content: string; bullets: string[] }> = {
   '02_structure': {
     title: 'Structure Refinement',
@@ -289,7 +326,102 @@ const WORKFLOW_STEP_COPY: Record<string, { title: string; content: string; bulle
       'Prepare precise inputs for targeted regenerate runs.',
     ],
   },
+  '09_video': {
+    title: 'Video Scene Studio',
+    content: 'Edit video scenes shot-by-shot with moyin-style prompt controls, then rerun phase-9 rendering.',
+    bullets: [
+      'Tune per-scene narrative goals and per-shot action prompts.',
+      'Adjust model, ratio, duration, audio, watermark, and seed in render options.',
+      'Preserve continuity by checking sequence before running video regeneration.',
+    ],
+  },
 };
+
+const VIDEO_TUTORIAL_STEPS: ReadonlyArray<VideoTutorialStepDefinition> = [
+  {
+    id: 'story_setup',
+    title: '1. Story Setup',
+    objective: 'Lock render defaults, visual style, and project tone before detailed edits.',
+  },
+  {
+    id: 'scene_design',
+    title: '2. Scene Design',
+    objective: 'Define narrative goal and emotional tone for each scene in sequence.',
+  },
+  {
+    id: 'shot_prompting',
+    title: '3. Shot Prompting',
+    objective: 'Write action prompts for every shot and preserve scene continuity.',
+  },
+  {
+    id: 'audio_motion',
+    title: '4. Audio And Motion',
+    objective: 'Set narration strategy, audio policy, and watermark decisions.',
+  },
+  {
+    id: 'run_qa',
+    title: '5. Run And QA',
+    objective: 'Save workspace, execute phase-9, and verify output logs for final QA.',
+  },
+];
+
+const VIDEO_VISUAL_STYLE_TEMPLATES: ReadonlyArray<VideoTextTemplate> = [
+  {
+    id: 'documentary_academic',
+    label: 'Documentary Academic',
+    value:
+      'Documentary realism, clean cinematic framing, steady dolly + gentle handheld, soft natural lighting, high legibility for educational context, credible human gestures, continuity-first editing language.',
+    hint: 'Good default for professional learning content with real-world credibility.',
+  },
+  {
+    id: 'broadcast_explainer',
+    label: 'Broadcast Explainer',
+    value:
+      'Broadcast explainer look, controlled studio lighting, medium-to-close compositions, confident presenter energy, clear visual hierarchy, restrained motion, polished newsroom-grade finish.',
+    hint: 'Use when the scene should feel like premium TV analysis.',
+  },
+  {
+    id: 'boardroom_premium',
+    label: 'Boardroom Premium',
+    value:
+      'Premium boardroom aesthetic, modern architectural interiors, glass and matte textures, deliberate camera blocking, high-end corporate realism, measured pacing, subtle depth separation.',
+    hint: 'Strong fit for executive roundtable and decision-making scenes.',
+  },
+  {
+    id: 'social_microdoc',
+    label: 'Social Micro-Doc',
+    value:
+      'Contemporary micro-documentary style, dynamic but controlled camera movement, intimate closeups, human-centered storytelling, tactile textures, emotionally grounded realism.',
+    hint: 'Best for personal stories, case studies, and field examples.',
+  },
+];
+
+const VIDEO_PALETTE_TEMPLATES: ReadonlyArray<VideoTextTemplate> = [
+  {
+    id: 'teal_navy_neutral',
+    label: 'Teal-Navy Neutral',
+    value: 'Deep navy and slate base, teal accents, neutral white highlights, low saturation, calm contrast, professional corporate mood.',
+    hint: 'Balanced and safe for finance/education topics.',
+  },
+  {
+    id: 'earth_sustainable',
+    label: 'Earth Sustainable',
+    value: 'Forest green and warm earth tones, natural beige midtones, soft daylight whites, gentle contrast, grounded sustainable narrative.',
+    hint: 'Great for ESG and sustainability storytelling.',
+  },
+  {
+    id: 'amber_charcoal_focus',
+    label: 'Amber-Charcoal Focus',
+    value: 'Charcoal foundation with warm amber highlights, restrained accent colors, crisp whites for key text moments, high subject focus.',
+    hint: 'Works well when you want authority and energy together.',
+  },
+  {
+    id: 'cool_mono_editorial',
+    label: 'Cool Mono Editorial',
+    value: 'Cool monochrome base with blue-gray gradients, selective color pop on key objects, modern editorial finish, sharp tonal separation.',
+    hint: 'Use for analytic, data-heavy, or strategic scenes.',
+  },
+];
 
 const DEFAULT_GLOBAL_TASK_PARAMS: JsonObject = {
   chapter_parallelism: 2,
@@ -571,6 +703,116 @@ function pickBoolean(record: Record<string, unknown> | null | undefined, keys: s
   return fallback;
 }
 
+function pickNumber(record: Record<string, unknown> | null | undefined, keys: string[], fallback = 0): number {
+  if (!record) return fallback;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return fallback;
+}
+
+function getNestedValue(record: Record<string, unknown> | null | undefined, path: string[]): unknown {
+  let cursor: unknown = record;
+  for (const key of path) {
+    const next = asRecord(cursor);
+    if (!next) return undefined;
+    cursor = next[key];
+  }
+  return cursor;
+}
+
+function setNestedValue(record: Record<string, unknown>, path: string[], value: unknown): Record<string, unknown> {
+  const root = JSON.parse(JSON.stringify(record)) as Record<string, unknown>;
+  let cursor: Record<string, unknown> = root;
+  for (let idx = 0; idx < path.length - 1; idx += 1) {
+    const key = path[idx];
+    const next = asRecord(cursor[key]);
+    if (next) {
+      cursor[key] = next;
+      cursor = next;
+      continue;
+    }
+    const created: Record<string, unknown> = {};
+    cursor[key] = created;
+    cursor = created;
+  }
+  cursor[path[path.length - 1]] = value;
+  return root;
+}
+
+function videoStoryboardRoot(record: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
+  const root = asRecord(record);
+  if (!root) return null;
+  return asRecord(root.production) || root;
+}
+
+function videoStoryboardScenes(record: Record<string, unknown> | null | undefined): Record<string, unknown>[] {
+  const root = videoStoryboardRoot(record);
+  const storyboard = asRecord(root?.storyboard);
+  const scenes = Array.isArray(storyboard?.scenes) ? storyboard.scenes : [];
+  return scenes.map((scene) => asRecord(scene) || {}).filter((scene) => Object.keys(scene).length > 0);
+}
+
+function estimateVideoShotDuration(shot: Record<string, unknown>): number {
+  const direct = pickNumber(shot, ['duration', 'duration_sec', 'duration_seconds'], NaN);
+  if (Number.isFinite(direct) && direct > 0) return Math.max(1, Math.min(15, direct));
+  return 5;
+}
+
+function estimateVideoSceneDuration(scene: Record<string, unknown>): number {
+  const direct = pickNumber(scene, ['duration', 'duration_sec', 'duration_seconds'], NaN);
+  if (Number.isFinite(direct) && direct > 0) return Math.max(1, Math.min(30, direct));
+  const shots = Array.isArray(scene.shots) ? scene.shots : [];
+  if (shots.length === 0) return 5;
+  const estimated = shots
+    .map((shot) => estimateVideoShotDuration(asRecord(shot) || {}))
+    .reduce((sum, value) => sum + value, 0);
+  return Math.max(2, Math.min(30, estimated));
+}
+
+function buildAutoVideoGroupLayout(
+  sceneCount: number,
+  sceneDurationByIndex: number[],
+  strategy: VideoGroupingStrategy,
+): number[][] {
+  if (sceneCount <= 0) return [];
+  const maxDuration = strategy === 'compact' ? 12 : 15;
+  const maxScenesPerGroup = strategy === 'compact' ? 2 : 3;
+  const groups: number[][] = [];
+  let cursor: number[] = [];
+  let cursorDuration = 0;
+
+  const flush = () => {
+    if (cursor.length === 0) return;
+    groups.push(cursor);
+    cursor = [];
+    cursorDuration = 0;
+  };
+
+  for (let index = 0; index < sceneCount; index += 1) {
+    const sceneDuration = Math.max(1, sceneDurationByIndex[index] || 5);
+    const wouldOverflowDuration = cursorDuration + sceneDuration > maxDuration && cursor.length > 0;
+    const wouldOverflowSize = cursor.length >= maxScenesPerGroup;
+    if (wouldOverflowDuration || wouldOverflowSize) flush();
+    cursor.push(index);
+    cursorDuration += sceneDuration;
+  }
+  flush();
+
+  return groups.length > 0 ? groups : [Array.from({ length: sceneCount }, (_, index) => index)];
+}
+
+function formatVideoGroupId(sceneIndexes: number[]): string {
+  if (sceneIndexes.length === 0) return 'group-empty';
+  if (sceneIndexes.length === 1) return `group-${sceneIndexes[0] + 1}`;
+  return `group-${sceneIndexes[0] + 1}-${sceneIndexes[sceneIndexes.length - 1] + 1}`;
+}
+
 function parseOntoSynthApplications(payload: unknown): OntoSynthApplication[] {
   const record = asRecord(payload);
   if (!record) return [];
@@ -751,6 +993,21 @@ function flowFromPhases(applicationName: string, phases: CreationPhase[]): FlowD
     title: 'Course Creation Workflow',
     subtitle: 'Backend phase profile loaded from OntoSynth output.',
     steps,
+  };
+}
+
+function ensureRequiredWorkflowSteps(
+  flow: FlowDefinition,
+  applicationName: string,
+  phases: CreationPhase[],
+): FlowDefinition {
+  const backend = flowFromPhases(applicationName, phases);
+  const existingIds = new Set(flow.steps.map((step) => step.id));
+  const missing = backend.steps.filter((step) => !existingIds.has(step.id));
+  if (missing.length === 0) return flow;
+  return {
+    ...flow,
+    steps: [...flow.steps, ...missing],
   };
 }
 
@@ -1320,6 +1577,7 @@ function shallowJsonObjectEquals(left: JsonObject, right: JsonObject): boolean {
 }
 
 export function StepFlowPage() {
+  const navigate = useNavigate();
   const connected = useChatStore((state) => state.connected);
   const profileRequestRef = useRef(0);
   const artifactsRequestRef = useRef(0);
@@ -1437,6 +1695,27 @@ export function StepFlowPage() {
   const [slidePreviewImageUrl, setSlidePreviewImageUrl] = useState('');
   const [slidePreviewLoading, setSlidePreviewLoading] = useState(false);
   const [slidePreviewError, setSlidePreviewError] = useState('');
+  const [selectedVideoPlanPath, setSelectedVideoPlanPath] = useState('');
+  const [videoPlanDraft, setVideoPlanDraft] = useState<JsonObject | null>(null);
+  const [videoPlanLoading, setVideoPlanLoading] = useState(false);
+  const [videoPlanDirty, setVideoPlanDirty] = useState(false);
+  const [videoPlanStatus, setVideoPlanStatus] = useState('');
+  const [videoPlanError, setVideoPlanError] = useState('');
+  const [selectedVideoSceneIndex, setSelectedVideoSceneIndex] = useState(0);
+  const [selectedVideoTutorialStepId, setSelectedVideoTutorialStepId] = useState<VideoTutorialStepId>('story_setup');
+  const [videoStudioExpertMode, setVideoStudioExpertMode] = useState(false);
+  const [videoGenerationMode, setVideoGenerationMode] = useState<VideoGenerationMode>('group');
+  const [videoGroupingStrategy, setVideoGroupingStrategy] = useState<VideoGroupingStrategy>('balanced');
+  const [videoGroupNameOverrides, setVideoGroupNameOverrides] = useState<Record<string, string>>({});
+  const [videoGroupCalibrationById, setVideoGroupCalibrationById] = useState<Record<string, VideoGroupCalibration>>({});
+  const [videoGenerationStateByTarget, setVideoGenerationStateByTarget] = useState<Record<string, VideoGenerationTargetState>>({});
+  const [videoPendingGenerationTarget, setVideoPendingGenerationTarget] = useState('');
+  const [selectedVideoStyleTemplateId, setSelectedVideoStyleTemplateId] = useState<string>(
+    VIDEO_VISUAL_STYLE_TEMPLATES[0]?.id || '',
+  );
+  const [selectedVideoPaletteTemplateId, setSelectedVideoPaletteTemplateId] = useState<string>(
+    VIDEO_PALETTE_TEMPLATES[0]?.id || '',
+  );
   const [phaseGuideLoading, setPhaseGuideLoading] = useState(false);
   const [phaseGuideError, setPhaseGuideError] = useState('');
   const [phaseGuideExtra, setPhaseGuideExtra] = useState<PhaseGuideExtra>(() => emptyPhaseGuideExtra());
@@ -1633,6 +1912,280 @@ export function StepFlowPage() {
     () => slideDesignEntries.find((entry) => entry.relativePath === selectedSlideDesignPath) || null,
     [slideDesignEntries, selectedSlideDesignPath],
   );
+  const videoJsonArtifacts = useMemo(
+    () =>
+      artifacts
+        .filter(
+          (item) =>
+            item.phaseId === '09_video' &&
+            item.relativePath.toLowerCase().endsWith('.json') &&
+            !/\/(?:chapter_structure|chapter_mining|document_structure)\.json$/i.test(item.relativePath),
+        )
+        .sort((a, b) => {
+          const rank = (path: string): number => {
+            const lower = path.toLowerCase();
+            if (lower.endsWith('/success.json')) return 0;
+            if (lower.endsWith('/video_script.json')) return 1;
+            if (lower.endsWith('/master_video.json')) return 2;
+            return 9;
+          };
+          const rankDiff = rank(a.relativePath) - rank(b.relativePath);
+          if (rankDiff !== 0) return rankDiff;
+          return a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true, sensitivity: 'base' });
+        }),
+    [artifacts],
+  );
+  const videoSceneDrafts = useMemo<Record<string, unknown>[]>(() => {
+    return videoStoryboardScenes(videoPlanDraft);
+  }, [videoPlanDraft]);
+  const selectedVideoScene = useMemo(
+    () => videoSceneDrafts[selectedVideoSceneIndex] || null,
+    [selectedVideoSceneIndex, videoSceneDrafts],
+  );
+  const videoSegmentCount = useMemo(() => {
+    const root = asRecord(videoPlanDraft);
+    if (!root) return 0;
+    const audioScript = asRecord(root.audio_script) || asRecord(root.script);
+    const segments = Array.isArray(audioScript?.segments) ? audioScript?.segments : [];
+    return segments.length;
+  }, [videoPlanDraft]);
+  const videoShotCount = useMemo(
+    () =>
+      videoSceneDrafts.reduce((sum, scene) => {
+        const shots = Array.isArray(scene.shots) ? scene.shots : [];
+        return sum + shots.length;
+      }, 0),
+    [videoSceneDrafts],
+  );
+  const videoSceneDurationByIndex = useMemo(
+    () => videoSceneDrafts.map((scene) => estimateVideoSceneDuration(scene)),
+    [videoSceneDrafts],
+  );
+  const videoGroupLayout = useMemo(
+    () => buildAutoVideoGroupLayout(videoSceneDrafts.length, videoSceneDurationByIndex, videoGroupingStrategy),
+    [videoSceneDrafts.length, videoSceneDurationByIndex, videoGroupingStrategy],
+  );
+  const videoShotGroups = useMemo(
+    () =>
+      videoGroupLayout.map((sceneIndexes, groupIndex) => {
+        const scenes = sceneIndexes.map((sceneIndex) => videoSceneDrafts[sceneIndex]).filter(Boolean);
+        const totalShots = scenes.reduce((sum, scene) => sum + (Array.isArray(scene.shots) ? scene.shots.length : 0), 0);
+        const estimatedDuration = sceneIndexes.reduce((sum, sceneIndex) => sum + (videoSceneDurationByIndex[sceneIndex] || 5), 0);
+        const defaultName = `Group ${groupIndex + 1}`;
+        const id = formatVideoGroupId(sceneIndexes);
+        const name = (videoGroupNameOverrides[id] || '').trim() || defaultName;
+        return {
+          id,
+          name,
+          groupIndex,
+          sceneIndexes,
+          scenes,
+          totalShots,
+          estimatedDuration: Math.max(2, Math.min(30, estimatedDuration)),
+        };
+      }),
+    [videoGroupLayout, videoGroupNameOverrides, videoSceneDrafts, videoSceneDurationByIndex],
+  );
+  const videoShotUnits = useMemo(
+    () =>
+      videoSceneDrafts.flatMap((scene, sceneIndex) => {
+        const shots = (Array.isArray(scene.shots) ? scene.shots : [])
+          .map((shot) => asRecord(shot) || {})
+          .filter((shot) => Object.keys(shot).length > 0);
+        return shots.map((shot, shotIndex) => {
+          const id = pickString(shot, ['id']) || `S${sceneIndex + 1}-Shot${shotIndex + 1}`;
+          return {
+            key: `shot-${sceneIndex + 1}-${shotIndex + 1}`,
+            id,
+            sceneIndex,
+            shotIndex,
+            sceneId: pickString(scene, ['id']) || `Scene ${sceneIndex + 1}`,
+            action: pickString(shot, ['action_description', 'actionDescription']),
+            narration: pickString(shot, ['speech_content', 'speechContent']),
+            estimatedDuration: estimateVideoShotDuration(shot),
+          };
+        });
+      }),
+    [videoSceneDrafts],
+  );
+  const videoScenesWithNarrativeCount = useMemo(
+    () =>
+      videoSceneDrafts.filter((scene) =>
+        !!pickString(scene, ['narrative_goal', 'narrativeGoal']),
+      ).length,
+    [videoSceneDrafts],
+  );
+  const videoScenesWithToneCount = useMemo(
+    () =>
+      videoSceneDrafts.filter((scene) =>
+        !!pickString(scene, ['emotional_tone', 'emotionalTone']),
+      ).length,
+    [videoSceneDrafts],
+  );
+  const videoShotsWithActionCount = useMemo(
+    () =>
+      videoSceneDrafts.reduce((sum, scene) => {
+        const shots = Array.isArray(scene.shots) ? scene.shots : [];
+        return (
+          sum +
+          shots.reduce((shotSum, shot) => {
+            const row = asRecord(shot);
+            return shotSum + (pickString(row, ['action_description', 'actionDescription']) ? 1 : 0);
+          }, 0)
+        );
+      }, 0),
+    [videoSceneDrafts],
+  );
+  const videoShotsWithNarrationCount = useMemo(
+    () =>
+      videoSceneDrafts.reduce((sum, scene) => {
+        const shots = Array.isArray(scene.shots) ? scene.shots : [];
+        return (
+          sum +
+          shots.reduce((shotSum, shot) => {
+            const row = asRecord(shot);
+            return shotSum + (pickString(row, ['speech_content', 'speechContent']) ? 1 : 0);
+          }, 0)
+        );
+      }, 0),
+    [videoSceneDrafts],
+  );
+  const videoRenderConfig = useMemo(
+    () => asRecord(getNestedValue(videoPlanDraft, ['render'])),
+    [videoPlanDraft],
+  );
+  const videoResolvedRenderOptions = useMemo(
+    () => asRecord(getNestedValue(videoPlanDraft, ['render', 'resolved_options'])),
+    [videoPlanDraft],
+  );
+  const videoVisualDirection = useMemo(
+    () => asRecord(getNestedValue(videoPlanDraft, ['visual_direction'])),
+    [videoPlanDraft],
+  );
+  const selectedVideoStyleTemplate = useMemo(
+    () =>
+      VIDEO_VISUAL_STYLE_TEMPLATES.find((template) => template.id === selectedVideoStyleTemplateId)
+      || VIDEO_VISUAL_STYLE_TEMPLATES[0]
+      || null,
+    [selectedVideoStyleTemplateId],
+  );
+  const selectedVideoPaletteTemplate = useMemo(
+    () =>
+      VIDEO_PALETTE_TEMPLATES.find((template) => template.id === selectedVideoPaletteTemplateId)
+      || VIDEO_PALETTE_TEMPLATES[0]
+      || null,
+    [selectedVideoPaletteTemplateId],
+  );
+  const videoTutorialStepState = useMemo<Record<VideoTutorialStepId, VideoTutorialStepState>>(() => {
+    const model = pickString(videoRenderConfig, ['model']);
+    const ratio = pickString(videoResolvedRenderOptions, ['ratio']);
+    const duration = pickNumber(videoResolvedRenderOptions, ['duration'], 0);
+    const seedConfigured = pickNumber(videoResolvedRenderOptions, ['seed'], NaN);
+    const generateAudio = pickBoolean(videoResolvedRenderOptions, ['generate_audio'], true);
+    const watermark = pickBoolean(videoResolvedRenderOptions, ['watermark'], false);
+    const style = pickString(videoVisualDirection, ['style']);
+    const palette = pickString(videoVisualDirection, ['palette']);
+    const hasScenes = videoSceneDrafts.length > 0;
+    const hasShots = videoShotCount > 0;
+    const runReady = !!selectedVideoPlanPath && !videoPlanDirty;
+    const runStateLabel = regenStatus.status === 'running' ? 'running' : regenStatus.status === 'success' ? 'ready' : 'idle';
+
+    return {
+      story_setup: {
+        passed: !!model && !!ratio && duration >= 2 && !!style,
+        scoreLabel: `${[model && 'model', ratio && 'ratio', duration >= 2 && 'duration', style && 'style'].filter(Boolean).length}/4 ready`,
+        checks: [
+          model ? `Model: ${model}` : 'Model is missing.',
+          ratio ? `Ratio: ${ratio}` : 'Ratio is missing.',
+          duration >= 2 ? `Duration: ${duration}s` : 'Duration should be at least 2 seconds.',
+          Number.isFinite(seedConfigured) ? `Seed: ${seedConfigured}` : 'Seed is not configured.',
+          palette ? `Palette: ${palette}` : 'Palette can improve visual consistency.',
+        ],
+        blockers: [!model ? 'Set render model.' : '', !ratio ? 'Set render ratio.' : '', duration < 2 ? 'Increase render duration.' : '', !style ? 'Set visual style direction.' : ''].filter(Boolean),
+      },
+      scene_design: {
+        passed: hasScenes && videoScenesWithNarrativeCount === videoSceneDrafts.length && videoScenesWithToneCount === videoSceneDrafts.length,
+        scoreLabel: `${videoScenesWithNarrativeCount}/${videoSceneDrafts.length || 0} narrative · ${videoScenesWithToneCount}/${videoSceneDrafts.length || 0} tone`,
+        checks: [
+          hasScenes ? `${videoSceneDrafts.length} scenes loaded.` : 'No scenes loaded yet.',
+          `${videoScenesWithNarrativeCount} scenes have narrative goals.`,
+          `${videoScenesWithToneCount} scenes have emotional tone.`,
+        ],
+        blockers: [
+          !hasScenes ? 'Generate or load a video storyboard JSON first.' : '',
+          hasScenes && videoScenesWithNarrativeCount < videoSceneDrafts.length ? 'Fill narrative goals for all scenes.' : '',
+          hasScenes && videoScenesWithToneCount < videoSceneDrafts.length ? 'Fill emotional tone for all scenes.' : '',
+        ].filter(Boolean),
+      },
+      shot_prompting: {
+        passed: hasShots && videoShotsWithActionCount === videoShotCount,
+        scoreLabel: `${videoShotsWithActionCount}/${videoShotCount || 0} shots scripted`,
+        checks: [
+          hasShots ? `${videoShotCount} shots detected.` : 'No shots detected in storyboard scenes.',
+          `${videoShotsWithActionCount} shots include action prompt.`,
+        ],
+        blockers: [
+          !hasShots ? 'Add or regenerate scene shots first.' : '',
+          hasShots && videoShotsWithActionCount < videoShotCount ? 'Complete action prompt for every shot.' : '',
+        ].filter(Boolean),
+      },
+      audio_motion: {
+        passed: hasShots && (generateAudio ? videoShotsWithNarrationCount > 0 : true),
+        scoreLabel: generateAudio ? `${videoShotsWithNarrationCount}/${videoShotCount || 0} narration` : 'Audio generation off',
+        checks: [
+          generateAudio ? 'Audio generation is enabled.' : 'Audio generation is disabled.',
+          `Watermark: ${watermark ? 'on' : 'off'}.`,
+          `${videoShotsWithNarrationCount} shots include narration text.`,
+        ],
+        blockers: [
+          !hasShots ? 'No shots available for audio planning.' : '',
+          hasShots && generateAudio && videoShotsWithNarrationCount === 0 ? 'Add narration to at least one shot or disable generated audio.' : '',
+        ].filter(Boolean),
+      },
+      run_qa: {
+        passed: runReady,
+        scoreLabel: runReady ? 'ready to run' : 'unsaved edits',
+        checks: [
+          selectedVideoPlanPath ? `Workspace: ${fileNameFromPath(selectedVideoPlanPath)}` : 'No workspace JSON selected.',
+          videoPlanDirty ? 'Unsaved edits detected.' : 'Workspace is saved.',
+          `Last run state: ${runStateLabel}.`,
+        ],
+        blockers: [
+          !selectedVideoPlanPath ? 'Select a video workspace JSON artifact.' : '',
+          videoPlanDirty ? 'Save video workspace before running phase-9.' : '',
+        ].filter(Boolean),
+      },
+    };
+  }, [
+    regenStatus.status,
+    selectedVideoPlanPath,
+    videoPlanDirty,
+    videoRenderConfig,
+    videoResolvedRenderOptions,
+    videoSceneDrafts,
+    videoScenesWithNarrativeCount,
+    videoScenesWithToneCount,
+    videoShotCount,
+    videoShotsWithActionCount,
+    videoShotsWithNarrationCount,
+    videoVisualDirection,
+  ]);
+  const selectedVideoTutorialStepIndex = useMemo(
+    () => VIDEO_TUTORIAL_STEPS.findIndex((step) => step.id === selectedVideoTutorialStepId),
+    [selectedVideoTutorialStepId],
+  );
+  const firstIncompleteVideoTutorialStepIndex = useMemo(
+    () => VIDEO_TUTORIAL_STEPS.findIndex((step) => !videoTutorialStepState[step.id].passed),
+    [videoTutorialStepState],
+  );
+  const activeVideoTutorialStep = useMemo(
+    () => VIDEO_TUTORIAL_STEPS[Math.max(0, selectedVideoTutorialStepIndex)] || VIDEO_TUTORIAL_STEPS[0],
+    [selectedVideoTutorialStepIndex],
+  );
+  const activeVideoTutorialState = useMemo(
+    () => videoTutorialStepState[activeVideoTutorialStep.id],
+    [activeVideoTutorialStep.id, videoTutorialStepState],
+  );
   const officialMaterialPaths = useMemo(
     () =>
       selectedMaterialFiles
@@ -1666,7 +2219,7 @@ export function StepFlowPage() {
   const createEnabledPhaseIds = useMemo(() => {
     const selected = PIPELINE_PHASE_TEMPLATES
       .map((phase) => phase.id)
-      .filter((id) => !!createPhaseSelection[id]);
+      .filter((id) => !!createPhaseSelection[id] && !CREATE_LOCKED_PHASE_IDS.has(id));
     if (rawMaterialPaths.length === 0) {
       return selected.filter((id) => id !== '00_textbook');
     }
@@ -1762,12 +2315,15 @@ export function StepFlowPage() {
   }, [createPipelinePhases, pinnedPhaseReasonId]);
 
   useEffect(() => {
-    if (PIPELINE_PHASE_TEMPLATES.length === 0) {
+    const selectablePhaseIds = PIPELINE_PHASE_TEMPLATES
+      .map((phase) => phase.id)
+      .filter((phaseId) => !CREATE_LOCKED_PHASE_IDS.has(phaseId));
+    if (selectablePhaseIds.length === 0) {
       setActiveCreatePhaseSettingsId('');
       return;
     }
-    if (!activeCreatePhaseSettingsId || !PIPELINE_PHASE_TEMPLATES.some((phase) => phase.id === activeCreatePhaseSettingsId)) {
-      setActiveCreatePhaseSettingsId(PIPELINE_PHASE_TEMPLATES[0]?.id || '');
+    if (!activeCreatePhaseSettingsId || !selectablePhaseIds.includes(activeCreatePhaseSettingsId)) {
+      setActiveCreatePhaseSettingsId(selectablePhaseIds[0] || '');
     }
   }, [activeCreatePhaseSettingsId]);
 
@@ -2003,6 +2559,13 @@ export function StepFlowPage() {
     });
   }, [rawMaterialPaths.length]);
 
+  useEffect(() => {
+    setCreatePhaseSelection((prev) => {
+      if (!prev['09_video']) return prev;
+      return { ...prev, '09_video': false };
+    });
+  }, []);
+
   const currentStep = flow.steps[Math.min(currentStepIndex, flow.steps.length - 1)];
   const currentConfirmed = currentStep ? !!confirmByStepId[currentStep.id] : false;
   const needsConfirm = currentStep?.requireConfirm ?? false;
@@ -2024,6 +2587,9 @@ export function StepFlowPage() {
       return 'xl:grid-cols-[minmax(280px,0.64fr)_minmax(0,1.36fr)]';
     }
     if (guidePhaseId === '07_slide') {
+      return 'xl:grid-cols-[minmax(320px,0.78fr)_minmax(0,1.22fr)]';
+    }
+    if (guidePhaseId === '09_video') {
       return 'xl:grid-cols-[minmax(320px,0.78fr)_minmax(0,1.22fr)]';
     }
     return 'xl:grid-cols-[minmax(300px,0.72fr)_minmax(0,1.28fr)]';
@@ -2234,9 +2800,26 @@ export function StepFlowPage() {
     }
 
     if (guidePhaseId === '09_video') {
+      const storyboardFiles = count(/\/(?:success|video_script|master_video)\.json$/i);
+      const renderFiles = count(/\/(?:render|video|production).*\.json$/i);
+      const sampleFiles = relativePaths
+        .filter((path) => path.toLowerCase().endsWith('.json'))
+        .slice(0, 4)
+        .map((path) => ({ path, label: path.split('/').pop() || path }));
       return {
         ...base,
-        objective: 'Render video outputs from finalized instructional assets.',
+        objective: 'Moyin-style video studio: tune per-scene prompts and render controls, then rerun phase-9.',
+        stats: [
+          { label: 'Files', value: String(files.length), tone: files.length > 0 ? 'success' : 'warning' },
+          { label: 'Workspace JSON', value: String(storyboardFiles), tone: storyboardFiles > 0 ? 'accent' : 'warning' },
+          { label: 'Render Logs', value: String(renderFiles), tone: renderFiles > 0 ? 'accent' : 'neutral' },
+        ],
+        keyFiles: sampleFiles,
+        actions: [
+          'Edit per-scene narrative goals and per-shot action prompts.',
+          'Tune model / ratio / duration / audio / watermark / seed in render options.',
+          'Run Phase to regenerate the full video pipeline.',
+        ],
       };
     }
 
@@ -2344,11 +2927,19 @@ export function StepFlowPage() {
         });
 
         const hasSaved = !!readSavedFlowJson(applicationId);
+        const backendFlow = flowFromPhases(selectedApplicationName, parsedPhases);
         if (!hasSaved) {
-          const backendFlow = flowFromPhases(selectedApplicationName, parsedPhases);
           const backendRawJson = JSON.stringify(backendFlow, null, 2);
           setFlow(backendFlow);
           setRawJson(backendRawJson);
+        } else {
+          setFlow((current) => {
+            const next = ensureRequiredWorkflowSteps(current, selectedApplicationName, parsedPhases);
+            if (next.steps.length !== current.steps.length) {
+              setRawJson(JSON.stringify(next, null, 2));
+            }
+            return next;
+          });
         }
       } catch (error) {
         if (selectedApplicationIdRef.current !== applicationId) return;
@@ -2986,6 +3577,71 @@ export function StepFlowPage() {
     };
   }, [currentSlidePreviewArtifact, readImageArtifactDataUrl]);
 
+  useEffect(() => {
+    setSelectedVideoPlanPath((current) => {
+      if (current && videoJsonArtifacts.some((item) => item.relativePath === current)) return current;
+      return videoJsonArtifacts[0]?.relativePath || '';
+    });
+  }, [videoJsonArtifacts]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedVideoPlanPath) {
+      setVideoPlanDraft(null);
+      setVideoPlanDirty(false);
+      setVideoPlanError('');
+      return;
+    }
+    const loadVideoWorkspace = async () => {
+      setVideoPlanLoading(true);
+      setVideoPlanError('');
+      try {
+        const content = await readTextArtifact(selectedVideoPlanPath);
+        if (cancelled) return;
+        const parsed = safeParseJsonRecord(content) as JsonObject | null;
+        if (!parsed) throw new Error('Failed to parse video workspace JSON');
+        setVideoPlanDraft(parsed);
+        setVideoPlanDirty(false);
+      } catch (error) {
+        if (!cancelled) {
+          setVideoPlanDraft(null);
+          setVideoPlanError(getErrorMessage(error, 'Failed to load video workspace'));
+        }
+      } finally {
+        if (!cancelled) setVideoPlanLoading(false);
+      }
+    };
+    void loadVideoWorkspace();
+    return () => {
+      cancelled = true;
+    };
+  }, [readTextArtifact, selectedVideoPlanPath]);
+
+  useEffect(() => {
+    setSelectedVideoSceneIndex((current) => {
+      if (current < videoSceneDrafts.length) return current;
+      return 0;
+    });
+  }, [videoSceneDrafts.length]);
+
+  useEffect(() => {
+    const validTargets = new Set<string>();
+    for (const group of videoShotGroups) validTargets.add(`group:${group.id}`);
+    for (const shot of videoShotUnits) validTargets.add(`shot:${shot.key}`);
+    setVideoGenerationStateByTarget((prev) => {
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([key]) => validTargets.has(key)),
+      );
+      return next;
+    });
+    setVideoGroupCalibrationById((prev) => {
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([key]) => videoShotGroups.some((group) => group.id === key)),
+      );
+      return next;
+    });
+  }, [videoShotGroups, videoShotUnits]);
+
   const updateStructureChapterField = useCallback((key: string, value: unknown) => {
     setStructureChapterDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
     setStructureMiningDraft((prev) => (prev ? { ...prev, [key]: value } : prev));
@@ -3269,6 +3925,176 @@ export function StepFlowPage() {
     }
   }, [loadArtifacts, selectedSlideDesignPath, slideDesignDraft, writeJsonArtifact]);
 
+  const updateVideoPlanValue = useCallback((path: string[], value: unknown) => {
+    setVideoPlanDraft((prev) => {
+      const current = asRecord(prev);
+      if (!current) return prev;
+      return setNestedValue(current, path, value);
+    });
+    setVideoPlanDirty(true);
+    setVideoPlanStatus('');
+  }, []);
+
+  const applyVideoTextTemplate = useCallback(
+    (path: string[], templateValue: string, mode: 'replace' | 'append', fieldLabel: string) => {
+      const currentValue = String(getNestedValue(videoPlanDraft, path) || '').trim();
+      const nextValue =
+        mode === 'append' && currentValue
+          ? `${currentValue} ${templateValue}`.replace(/\s+/g, ' ').trim()
+          : templateValue;
+      updateVideoPlanValue(path, nextValue);
+      setVideoPlanStatus(`${fieldLabel} template ${mode === 'append' ? 'appended' : 'applied'}.`);
+    },
+    [updateVideoPlanValue, videoPlanDraft],
+  );
+
+  const updateVideoSceneFieldAt = useCallback((sceneIndex: number, field: string, value: unknown) => {
+    setVideoPlanDraft((prev) => {
+      const current = asRecord(prev);
+      if (!current) return prev;
+      const next = JSON.parse(JSON.stringify(current)) as Record<string, unknown>;
+      const primaryRoot = videoStoryboardRoot(next);
+      const storyboard = asRecord(primaryRoot?.storyboard);
+      if (!storyboard || !Array.isArray(storyboard.scenes) || sceneIndex >= storyboard.scenes.length) {
+        return prev;
+      }
+      const scene = asRecord(storyboard.scenes[sceneIndex]);
+      if (!scene) return prev;
+      scene[field] = value;
+      return next;
+    });
+    setVideoPlanDirty(true);
+    setVideoPlanStatus('');
+  }, []);
+
+  const updateVideoShotFieldAt = useCallback((sceneIndex: number, shotIndex: number, field: string, value: unknown) => {
+    setVideoPlanDraft((prev) => {
+      const current = asRecord(prev);
+      if (!current) return prev;
+      const next = JSON.parse(JSON.stringify(current)) as Record<string, unknown>;
+      const primaryRoot = videoStoryboardRoot(next);
+      const storyboard = asRecord(primaryRoot?.storyboard);
+      if (!storyboard || !Array.isArray(storyboard.scenes) || sceneIndex >= storyboard.scenes.length) {
+        return prev;
+      }
+      const scene = asRecord(storyboard.scenes[sceneIndex]);
+      if (!scene || !Array.isArray(scene.shots) || shotIndex >= scene.shots.length) return prev;
+      const shot = asRecord(scene.shots[shotIndex]);
+      if (!shot) return prev;
+      shot[field] = value;
+      return next;
+    });
+    setVideoPlanDirty(true);
+    setVideoPlanStatus('');
+  }, []);
+
+  const isVideoTutorialStepLocked = useCallback((stepId: VideoTutorialStepId): boolean => {
+    if (videoStudioExpertMode) return false;
+    const index = VIDEO_TUTORIAL_STEPS.findIndex((step) => step.id === stepId);
+    if (index <= 0) return false;
+    for (let i = 0; i < index; i += 1) {
+      const previous = VIDEO_TUTORIAL_STEPS[i];
+      if (!videoTutorialStepState[previous.id].passed) return true;
+    }
+    return false;
+  }, [videoStudioExpertMode, videoTutorialStepState]);
+
+  const selectVideoTutorialStep = useCallback((stepId: VideoTutorialStepId) => {
+    if (isVideoTutorialStepLocked(stepId)) return;
+    setSelectedVideoTutorialStepId(stepId);
+  }, [isVideoTutorialStepLocked]);
+
+  const moveVideoTutorialStep = useCallback((direction: 'prev' | 'next', options?: { skip?: boolean }) => {
+    const currentIndex = VIDEO_TUTORIAL_STEPS.findIndex((step) => step.id === selectedVideoTutorialStepId);
+    if (currentIndex < 0) return;
+    if (direction === 'prev') {
+      if (currentIndex === 0) return;
+      setSelectedVideoTutorialStepId(VIDEO_TUTORIAL_STEPS[currentIndex - 1].id);
+      return;
+    }
+    if (currentIndex >= VIDEO_TUTORIAL_STEPS.length - 1) return;
+    if (!videoStudioExpertMode && !options?.skip && !videoTutorialStepState[VIDEO_TUTORIAL_STEPS[currentIndex].id].passed) return;
+    const nextStep = VIDEO_TUTORIAL_STEPS[currentIndex + 1];
+    if (!videoStudioExpertMode && !options?.skip && isVideoTutorialStepLocked(nextStep.id)) return;
+    setSelectedVideoTutorialStepId(nextStep.id);
+  }, [isVideoTutorialStepLocked, selectedVideoTutorialStepId, videoStudioExpertMode, videoTutorialStepState]);
+
+  const updateVideoGroupName = useCallback((groupId: string, value: string) => {
+    setVideoGroupNameOverrides((prev) => ({ ...prev, [groupId]: value }));
+  }, []);
+
+  const regroupVideoStudio = useCallback(() => {
+    setVideoGroupingStrategy((prev) => (prev === 'balanced' ? 'compact' : 'balanced'));
+    setVideoGroupNameOverrides({});
+    setVideoGroupCalibrationById({});
+    setVideoPlanStatus('Scene groups rebalanced.');
+  }, []);
+
+  const evaluateVideoGroupCalibration = useCallback((sceneIndexes: number[]) => {
+    const notes: string[] = [];
+    for (const sceneIndex of sceneIndexes) {
+      const scene = videoSceneDrafts[sceneIndex];
+      if (!scene) continue;
+      const sceneLabel = pickString(scene, ['id']) || `Scene ${sceneIndex + 1}`;
+      if (!pickString(scene, ['narrative_goal', 'narrativeGoal'])) {
+        notes.push(`${sceneLabel}: narrative goal is missing.`);
+      }
+      if (!pickString(scene, ['emotional_tone', 'emotionalTone'])) {
+        notes.push(`${sceneLabel}: emotional tone is missing.`);
+      }
+      const shots = (Array.isArray(scene.shots) ? scene.shots : [])
+        .map((shot) => asRecord(shot) || {})
+        .filter((shot) => Object.keys(shot).length > 0);
+      shots.forEach((shot, shotIndex) => {
+        if (!pickString(shot, ['action_description', 'actionDescription'])) {
+          notes.push(`${sceneLabel} shot ${shotIndex + 1}: action prompt is missing.`);
+        }
+      });
+    }
+    return {
+      status: notes.length === 0 ? 'calibrated' : 'failed',
+      notes,
+    } as const;
+  }, [videoSceneDrafts]);
+
+  const calibrateVideoGroup = useCallback((groupId: string, sceneIndexes: number[]) => {
+    const result = evaluateVideoGroupCalibration(sceneIndexes);
+    setVideoGroupCalibrationById((prev) => ({
+      ...prev,
+      [groupId]: {
+        status: result.status,
+        notes: result.notes,
+        checkedAt: Date.now(),
+      },
+    }));
+  }, [evaluateVideoGroupCalibration]);
+
+  const calibrateAllVideoGroups = useCallback(() => {
+    const nextState: Record<string, VideoGroupCalibration> = {};
+    for (const group of videoShotGroups) {
+      const result = evaluateVideoGroupCalibration(group.sceneIndexes);
+      nextState[group.id] = {
+        status: result.status,
+        notes: result.notes,
+        checkedAt: Date.now(),
+      };
+    }
+    setVideoGroupCalibrationById(nextState);
+  }, [evaluateVideoGroupCalibration, videoShotGroups]);
+
+  const saveVideoPlanWorkspace = useCallback(async () => {
+    if (!selectedVideoPlanPath || !videoPlanDraft) return;
+    try {
+      await writeJsonArtifact(selectedVideoPlanPath, videoPlanDraft);
+      setVideoPlanDirty(false);
+      setVideoPlanStatus('Video workspace saved');
+      setVideoPlanError('');
+      void loadArtifacts();
+    } catch (error) {
+      setVideoPlanError(getErrorMessage(error, 'Failed to save video workspace'));
+    }
+  }, [loadArtifacts, selectedVideoPlanPath, videoPlanDraft, writeJsonArtifact]);
+
   const regeneratePhase = useCallback(async () => {
     if (!connected || !selectedApplicationId || !selectedDocumentName || !selectedPhaseId) return;
     setStepPollCount(0);
@@ -3312,6 +4138,119 @@ export function StepFlowPage() {
       });
     }
   }, [connected, selectedApplicationId, selectedDocumentName, selectedPhaseId]);
+
+  const runVideoScopedGeneration = useCallback(async (targetKey: string, scope: Record<string, unknown>, statusLabel: string) => {
+    if (!selectedVideoPlanPath || !videoPlanDraft) {
+      setVideoPlanError('No video workspace JSON selected.');
+      return;
+    }
+    if (stepRunActive) {
+      setVideoGenerationStateByTarget((prev) => ({
+        ...prev,
+        [targetKey]: {
+          status: 'error',
+          message: 'Another phase run is already active.',
+          updatedAt: Date.now(),
+        },
+      }));
+      return;
+    }
+    const current = asRecord(videoPlanDraft);
+    if (!current) {
+      setVideoPlanError('Video workspace JSON is invalid.');
+      return;
+    }
+    const scopedDraft = setNestedValue(current, ['render', 'scope'], scope);
+    try {
+      await writeJsonArtifact(selectedVideoPlanPath, scopedDraft);
+      setVideoPlanDraft(scopedDraft);
+      setVideoPlanDirty(false);
+      setVideoPlanStatus(statusLabel);
+      setVideoPlanError('');
+      setVideoPendingGenerationTarget(targetKey);
+      setVideoGenerationStateByTarget((prev) => ({
+        ...prev,
+        [targetKey]: {
+          status: 'running',
+          message: 'Submitting phase-9 run...',
+          updatedAt: Date.now(),
+        },
+      }));
+      void loadArtifacts();
+      await regeneratePhase();
+    } catch (error) {
+      setVideoGenerationStateByTarget((prev) => ({
+        ...prev,
+        [targetKey]: {
+          status: 'error',
+          message: getErrorMessage(error, 'Failed to submit scoped run'),
+          updatedAt: Date.now(),
+        },
+      }));
+      setVideoPendingGenerationTarget('');
+      setVideoPlanError(getErrorMessage(error, 'Failed to submit scoped run'));
+    }
+  }, [loadArtifacts, regeneratePhase, selectedVideoPlanPath, stepRunActive, videoPlanDraft, writeJsonArtifact]);
+
+  const runVideoGroupGeneration = useCallback(async (groupId: string, groupName: string, sceneIndexes: number[]) => {
+    const sceneIds = sceneIndexes.map((sceneIndex) => {
+      const scene = videoSceneDrafts[sceneIndex];
+      return pickString(scene, ['id']) || `scene_${sceneIndex + 1}`;
+    });
+    const scope = {
+      mode: 'group',
+      target: 'group',
+      group_id: groupId,
+      group_name: groupName,
+      scene_indexes: sceneIndexes,
+      scene_ids: sceneIds,
+    };
+    await runVideoScopedGeneration(`group:${groupId}`, scope, `Queued group run: ${groupName}`);
+  }, [runVideoScopedGeneration, videoSceneDrafts]);
+
+  const runVideoSingleShotGeneration = useCallback(async (shot: {
+    key: string;
+    id: string;
+    sceneIndex: number;
+    shotIndex: number;
+    sceneId: string;
+  }) => {
+    const scope = {
+      mode: 'single_shot',
+      target: 'shot',
+      scene_index: shot.sceneIndex,
+      shot_index: shot.shotIndex,
+      scene_id: shot.sceneId,
+      shot_id: shot.id,
+    };
+    await runVideoScopedGeneration(`shot:${shot.key}`, scope, `Queued shot run: ${shot.sceneId} / ${shot.id}`);
+  }, [runVideoScopedGeneration]);
+
+  useEffect(() => {
+    if (!videoPendingGenerationTarget || regenStatus.mode !== 'phase') return;
+    if (regenStatus.status === 'running') {
+      setVideoGenerationStateByTarget((prev) => ({
+        ...prev,
+        [videoPendingGenerationTarget]: {
+          status: 'running',
+          message: regenStatus.message || 'Phase run in progress...',
+          updatedAt: Date.now(),
+        },
+      }));
+      return;
+    }
+    if (regenStatus.status === 'success' || regenStatus.status === 'error') {
+      setVideoGenerationStateByTarget((prev) => ({
+        ...prev,
+        [videoPendingGenerationTarget]: {
+          status: regenStatus.status === 'success' ? 'success' : 'error',
+          message: regenStatus.message || (regenStatus.status === 'success' ? 'Run completed.' : 'Run failed.'),
+          updatedAt: Date.now(),
+        },
+      }));
+      setVideoPendingGenerationTarget('');
+    }
+  }, [regenStatus.message, regenStatus.mode, regenStatus.status, videoPendingGenerationTarget]);
 
   const regenerateSlide = useCallback(async () => {
     if (!connected || !selectedApplicationId) return;
@@ -3915,6 +4854,22 @@ export function StepFlowPage() {
     setSlideSectionId('');
     setSlideItemId('');
     setSlideRevisionNote('');
+    setSelectedVideoPlanPath('');
+    setVideoPlanDraft(null);
+    setVideoPlanDirty(false);
+    setVideoPlanStatus('');
+    setVideoPlanError('');
+    setSelectedVideoSceneIndex(0);
+    setSelectedVideoTutorialStepId('story_setup');
+    setVideoStudioExpertMode(false);
+    setVideoGenerationMode('group');
+    setVideoGroupingStrategy('balanced');
+    setVideoGroupNameOverrides({});
+    setVideoGroupCalibrationById({});
+    setVideoGenerationStateByTarget({});
+    setVideoPendingGenerationTarget('');
+    setSelectedVideoStyleTemplateId(VIDEO_VISUAL_STYLE_TEMPLATES[0]?.id || '');
+    setSelectedVideoPaletteTemplateId(VIDEO_PALETTE_TEMPLATES[0]?.id || '');
     setRegenStatus({ status: 'idle', message: '', runId: '', logTail: '', mode: '' });
   }, [connected, loadApplications]);
 
@@ -4173,6 +5128,22 @@ export function StepFlowPage() {
     setSlideSectionId('');
     setSlideItemId('');
     setSlideRevisionNote('');
+    setSelectedVideoPlanPath('');
+    setVideoPlanDraft(null);
+    setVideoPlanDirty(false);
+    setVideoPlanStatus('');
+    setVideoPlanError('');
+    setSelectedVideoSceneIndex(0);
+    setSelectedVideoTutorialStepId('story_setup');
+    setVideoStudioExpertMode(false);
+    setVideoGenerationMode('group');
+    setVideoGroupingStrategy('balanced');
+    setVideoGroupNameOverrides({});
+    setVideoGroupCalibrationById({});
+    setVideoGenerationStateByTarget({});
+    setVideoPendingGenerationTarget('');
+    setSelectedVideoStyleTemplateId(VIDEO_VISUAL_STYLE_TEMPLATES[0]?.id || '');
+    setSelectedVideoPaletteTemplateId(VIDEO_PALETTE_TEMPLATES[0]?.id || '');
     setRegenStatus({ status: 'idle', message: '', runId: '', logTail: '', mode: '' });
     setStepPollCount(0);
     setStepLastUpdateAt(null);
@@ -4195,13 +5166,13 @@ export function StepFlowPage() {
   useEffect(() => {
     if (workflowMode !== 'edit') return;
     const stepPhaseId = currentStep?.id || '';
-    if (!stepPhaseId || !phases.some((phase) => phase.id === stepPhaseId)) return;
+    if (!stepPhaseId) return;
     if (selectedPhaseId !== stepPhaseId) {
       setSelectedPhaseId(stepPhaseId);
       setSelectedArtifactPath('');
       setArtifactStatus('');
     }
-  }, [workflowMode, currentStep?.id, phases, selectedPhaseId]);
+  }, [workflowMode, currentStep?.id, selectedPhaseId]);
 
   useEffect(() => {
     void readArtifact();
@@ -4644,14 +5615,15 @@ export function StepFlowPage() {
                     </button>
                   </div>
                   <p className="text-[11px] text-aegis-text-dim">
-                    Textbook Generation is auto-enabled only when Raw Materials are uploaded. These settings map to OntoSynth TaskParams/phase params payload.
+                    Textbook Generation is auto-enabled only when Raw Materials are uploaded. Video phase is edit-only and configured from the Edit Application branch.
                   </p>
                   <div className="grid grid-cols-1 lg:grid-cols-[minmax(220px,0.9fr)_minmax(0,1.1fr)] gap-3">
                     <div className="rounded-md border border-aegis-primary/20 bg-aegis-card p-2 max-h-[420px] overflow-auto space-y-1">
                       <p className="px-1 text-[11px] text-aegis-text-dim">Enabled Phases</p>
                       {PIPELINE_PHASE_TEMPLATES.map((phase) => {
                         const textbookLocked = phase.id === '00_textbook' && rawMaterialPaths.length === 0;
-                        const checked = textbookLocked ? false : !!createPhaseSelection[phase.id];
+                        const createLocked = CREATE_LOCKED_PHASE_IDS.has(phase.id);
+                        const checked = textbookLocked || createLocked ? false : !!createPhaseSelection[phase.id];
                         const active = activeCreatePhaseSettingsId === phase.id;
                         return (
                           <div
@@ -4661,20 +5633,23 @@ export function StepFlowPage() {
                               active
                                 ? 'border-aegis-primary/45 bg-aegis-primary/[0.12] text-aegis-primary'
                                 : 'border-aegis-primary/20 bg-aegis-card text-aegis-text',
-                              textbookLocked ? 'opacity-60' : '',
+                              textbookLocked || createLocked ? 'opacity-60' : '',
                             )}
                           >
                             <input
                               type="checkbox"
                               checked={checked}
-                              disabled={textbookLocked}
+                              disabled={textbookLocked || createLocked}
                               onChange={(event) =>
                                 setCreatePhaseSelection((prev) => ({ ...prev, [phase.id]: event.target.checked }))
                               }
                             />
                             <button
                               type="button"
-                              onClick={() => setActiveCreatePhaseSettingsId(phase.id)}
+                              onClick={() => {
+                                if (createLocked) return;
+                                setActiveCreatePhaseSettingsId(phase.id);
+                              }}
                               className={clsx(
                                 'flex-1 text-left',
                                 active ? 'text-aegis-primary' : 'text-aegis-text',
@@ -4682,6 +5657,9 @@ export function StepFlowPage() {
                             >
                               {phase.title}
                             </button>
+                            {createLocked ? (
+                              <span className="text-[10px] uppercase tracking-[0.04em] text-aegis-text-dim">Edit only</span>
+                            ) : null}
                           </div>
                         );
                       })}
@@ -5365,6 +6343,22 @@ export function StepFlowPage() {
                 <RefreshCw size={12} />
                 Restart Steps
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const query = new URLSearchParams();
+                  if (selectedApplicationId) query.set('applicationId', selectedApplicationId);
+                  if (selectedDocumentName) query.set('documentName', selectedDocumentName);
+                  if (selectedPhaseId) query.set('phaseId', selectedPhaseId);
+                  query.set('autoOpen', '0');
+                  navigate(`/documents?${query.toString()}`);
+                }}
+                disabled={!selectedApplicationId || !selectedDocumentName}
+                className="px-2.5 py-1.5 text-[12px] rounded-lg border border-aegis-border bg-aegis-card text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)] disabled:opacity-60 inline-flex items-center gap-1.5"
+              >
+                <ExternalLink size={12} />
+                Open In Document Studio
+              </button>
             </div>
             {artifactsError && <p className="mt-2 text-[11px] text-aegis-danger">{artifactsError}</p>}
             {(regenStatus.runId || regenStatus.message) ? (
@@ -5763,7 +6757,9 @@ export function StepFlowPage() {
                   <p className="text-[12px] text-aegis-text-dim">Phase Workspace</p>
                   <p className="mt-1 text-[11px] text-aegis-text-dim">
                     {guidePhaseId
-                      ? `Focused editing for ${PIPELINE_PHASE_TEMPLATES.find((phase) => phase.id === guidePhaseId)?.title || guidePhaseId}.`
+                      ? guidePhaseId === '09_video'
+                        ? 'Guided production studio with tutorial gating and full storyboard editing.'
+                        : `Focused editing for ${PIPELINE_PHASE_TEMPLATES.find((phase) => phase.id === guidePhaseId)?.title || guidePhaseId}.`
                       : 'Select a workflow step to load a phase workspace.'}
                   </p>
                 </div>
@@ -6769,6 +7765,751 @@ export function StepFlowPage() {
                       ) : (
                         <div className="h-full flex items-center justify-center text-[12px] text-aegis-text-dim">No slide design selected.</div>
                       )}
+                    </div>
+                  </div>
+                </div>
+              ) : guidePhaseId === '09_video' ? (
+                <div className="h-full min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(220px,0.54fr)_minmax(0,1.16fr)_minmax(300px,0.84fr)] gap-3">
+                  <div className="min-h-0 rounded-lg border border-aegis-primary/25 bg-aegis-card p-2.5 flex flex-col gap-3 overflow-y-auto">
+                    <div className="flex items-center gap-2">
+                      <div>
+                        <p className="text-[11px] text-aegis-text-dim">Video Tutorial Steps</p>
+                        <p className="text-[10px] text-aegis-text-dim">
+                          Guided production studio for phase-9.
+                        </p>
+                      </div>
+                      <label className="ml-auto inline-flex items-center gap-1.5 text-[10px] text-aegis-text-dim">
+                        <input
+                          type="checkbox"
+                          checked={videoStudioExpertMode}
+                          onChange={(event) => setVideoStudioExpertMode(event.target.checked)}
+                        />
+                        Expert mode
+                      </label>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {VIDEO_TUTORIAL_STEPS.map((step, index) => {
+                        const state = videoTutorialStepState[step.id];
+                        const locked = isVideoTutorialStepLocked(step.id);
+                        const active = selectedVideoTutorialStepId === step.id;
+                        return (
+                          <button
+                            key={`video-tutorial-${step.id}`}
+                            type="button"
+                            onClick={() => selectVideoTutorialStep(step.id)}
+                            disabled={locked}
+                            className={clsx(
+                              'w-full text-left rounded-md border px-2 py-1.5 transition-colors',
+                              active
+                                ? 'border-aegis-primary/50 bg-aegis-primary/[0.12]'
+                                : 'border-aegis-border bg-aegis-elevated hover:bg-[rgb(var(--aegis-overlay)/0.05)]',
+                              locked ? 'opacity-45 cursor-not-allowed' : '',
+                            )}
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={clsx(
+                                  'h-1.5 w-1.5 rounded-full',
+                                  state.passed ? 'bg-aegis-success' : 'bg-aegis-warning',
+                                )}
+                              />
+                              <span className="text-[11px] text-aegis-text">{step.title}</span>
+                              <span className="ml-auto text-[10px] text-aegis-text-dim">{state.scoreLabel}</span>
+                            </div>
+                            <p className="mt-1 text-[10px] text-aegis-text-dim line-clamp-2">
+                              {step.objective}
+                            </p>
+                            {locked ? <p className="mt-1 text-[10px] text-aegis-warning">Complete earlier step first.</p> : null}
+                            {index === firstIncompleteVideoTutorialStepIndex ? (
+                              <p className="mt-1 text-[10px] text-aegis-primary">Current recommended focus.</p>
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="rounded-md border border-aegis-border bg-aegis-elevated p-2 space-y-1.5">
+                      <p className="text-[11px] text-aegis-text">{activeVideoTutorialStep.title}</p>
+                      <p className="text-[10px] text-aegis-text-dim">{activeVideoTutorialStep.objective}</p>
+                      <div className="space-y-1">
+                        {activeVideoTutorialState.checks.map((check, index) => (
+                          <p key={`video-check-${activeVideoTutorialStep.id}-${index}`} className="text-[10px] text-aegis-text-dim">
+                            • {check}
+                          </p>
+                        ))}
+                      </div>
+                      {activeVideoTutorialState.blockers.length > 0 ? (
+                        <div className="rounded-md border border-aegis-warning/30 bg-aegis-warning/[0.08] p-1.5 space-y-1">
+                          {activeVideoTutorialState.blockers.map((blocker, index) => (
+                            <p key={`video-blocker-${activeVideoTutorialStep.id}-${index}`} className="text-[10px] text-aegis-warning">
+                              {blocker}
+                            </p>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-aegis-success">Step checks passed.</p>
+                      )}
+                    </div>
+
+                    <div className="mt-auto flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => moveVideoTutorialStep('prev')}
+                        disabled={selectedVideoTutorialStepIndex <= 0}
+                        className={clsx(
+                          'px-2 py-1 text-[10px] rounded-md border',
+                          selectedVideoTutorialStepIndex <= 0
+                            ? 'border-aegis-border text-aegis-text-dim opacity-60 cursor-not-allowed'
+                            : 'border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]',
+                        )}
+                      >
+                        Previous
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveVideoTutorialStep('next')}
+                        disabled={
+                          selectedVideoTutorialStepIndex < 0 ||
+                          selectedVideoTutorialStepIndex >= VIDEO_TUTORIAL_STEPS.length - 1 ||
+                          (!videoStudioExpertMode && !activeVideoTutorialState.passed)
+                        }
+                        className={clsx(
+                          'px-2 py-1 text-[10px] rounded-md border text-white',
+                          selectedVideoTutorialStepIndex >= VIDEO_TUTORIAL_STEPS.length - 1 ||
+                            (!videoStudioExpertMode && !activeVideoTutorialState.passed)
+                            ? 'bg-aegis-text-dim opacity-60 cursor-not-allowed border-aegis-text-dim'
+                            : 'bg-aegis-primary border-aegis-primary hover:opacity-90',
+                        )}
+                      >
+                        Next
+                      </button>
+                      {!videoStudioExpertMode && selectedVideoTutorialStepIndex < VIDEO_TUTORIAL_STEPS.length - 1 ? (
+                        <button
+                          type="button"
+                          onClick={() => moveVideoTutorialStep('next', { skip: true })}
+                          className="ml-auto px-2 py-1 text-[10px] rounded-md border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+                        >
+                          Skip
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="min-h-0 rounded-lg border border-aegis-primary/20 bg-aegis-card p-3 flex flex-col overflow-hidden">
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div>
+                        <p className="text-[11px] text-aegis-text-dim">Storyboard Canvas</p>
+                        <p className="text-[10px] text-aegis-text-dim">
+                          scenes {videoSceneDrafts.length} · shots {videoShotCount} · narration {videoShotsWithNarrationCount}
+                        </p>
+                      </div>
+                      <span className="ml-auto text-[10px] text-aegis-text-dim">
+                        {selectedVideoScene ? `Selected ${pickString(selectedVideoScene, ['id']) || `Scene ${selectedVideoSceneIndex + 1}`}` : 'No scene selected'}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 shrink-0 flex flex-wrap items-center gap-2">
+                      <span className="text-[10px] text-aegis-text-dim">Generation Mode</span>
+                      <div className="inline-flex rounded-md border border-aegis-border overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => setVideoGenerationMode('group')}
+                          className={clsx(
+                            'px-2 py-1 text-[10px]',
+                            videoGenerationMode === 'group'
+                              ? 'bg-aegis-primary/15 text-aegis-primary'
+                              : 'bg-aegis-card text-aegis-text-dim hover:bg-[rgb(var(--aegis-overlay)/0.04)]',
+                          )}
+                        >
+                          Group Mode
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setVideoGenerationMode('single')}
+                          className={clsx(
+                            'px-2 py-1 text-[10px]',
+                            videoGenerationMode === 'single'
+                              ? 'bg-aegis-primary/15 text-aegis-primary'
+                              : 'bg-aegis-card text-aegis-text-dim hover:bg-[rgb(var(--aegis-overlay)/0.04)]',
+                          )}
+                        >
+                          Single-Shot Mode
+                        </button>
+                      </div>
+                      {videoGenerationMode === 'group' ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={regroupVideoStudio}
+                            className="px-2 py-1 text-[10px] rounded-md border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+                          >
+                            Regroup ({videoGroupingStrategy})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={calibrateAllVideoGroups}
+                            className="px-2 py-1 text-[10px] rounded-md border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+                          >
+                            Calibrate All
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-2 flex-1 min-h-0 overflow-auto pr-1 space-y-3">
+                      {videoPlanLoading ? (
+                        <div className="h-full flex items-center justify-center text-[12px] text-aegis-text-dim">Loading video workspace...</div>
+                      ) : videoSceneDrafts.length === 0 ? (
+                        <div className="h-full rounded-md border border-dashed border-aegis-border p-4 text-[12px] text-aegis-text-dim flex items-center justify-center text-center">
+                          No video storyboard scenes detected yet. Run phase 9 first or open video JSON in Advanced Files.
+                        </div>
+                      ) : (
+                        <>
+                          {videoGenerationMode === 'group' ? (
+                            <div className="space-y-2">
+                              {videoShotGroups.map((group) => {
+                                const calibration = videoGroupCalibrationById[group.id] || {
+                                  status: 'idle',
+                                  notes: [],
+                                  checkedAt: null,
+                                };
+                                const generationTargetKey = `group:${group.id}`;
+                                const generationState = videoGenerationStateByTarget[generationTargetKey] || {
+                                  status: 'idle',
+                                  message: '',
+                                  updatedAt: null,
+                                };
+                                const focusLabel = group.sceneIndexes
+                                  .map((sceneIndex) => pickString(videoSceneDrafts[sceneIndex], ['id']) || `S${sceneIndex + 1}`)
+                                  .join(', ');
+                                return (
+                                  <div key={`video-group-${group.id}`} className="rounded-md border border-aegis-border bg-aegis-elevated p-2 space-y-2">
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        value={group.name}
+                                        onChange={(event) => updateVideoGroupName(group.id, event.target.value)}
+                                        className="min-w-[160px] flex-1 rounded-md border border-aegis-border bg-aegis-card px-2 py-1 text-[11px] text-aegis-text outline-none"
+                                      />
+                                      <span className="text-[10px] text-aegis-text-dim">
+                                        {group.sceneIndexes.length} scenes · {group.totalShots} shots · ~{Math.round(group.estimatedDuration)}s
+                                      </span>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2 text-[10px] text-aegis-text-dim">
+                                      <span>Scenes: {focusLabel || 'n/a'}</span>
+                                      <span
+                                        className={clsx(
+                                          'px-1.5 py-0.5 rounded border',
+                                          calibration.status === 'calibrated'
+                                            ? 'border-aegis-success/35 text-aegis-success bg-aegis-success/[0.08]'
+                                            : calibration.status === 'failed'
+                                              ? 'border-aegis-danger/35 text-aegis-danger bg-aegis-danger/[0.08]'
+                                              : 'border-aegis-border text-aegis-text-dim bg-aegis-card',
+                                        )}
+                                      >
+                                        calibration: {calibration.status}
+                                      </span>
+                                      <span
+                                        className={clsx(
+                                          'px-1.5 py-0.5 rounded border',
+                                          generationState.status === 'success'
+                                            ? 'border-aegis-success/35 text-aegis-success bg-aegis-success/[0.08]'
+                                            : generationState.status === 'error'
+                                              ? 'border-aegis-danger/35 text-aegis-danger bg-aegis-danger/[0.08]'
+                                              : generationState.status === 'running'
+                                                ? 'border-aegis-primary/35 text-aegis-primary bg-aegis-primary/[0.08]'
+                                                : 'border-aegis-border text-aegis-text-dim bg-aegis-card',
+                                        )}
+                                      >
+                                        run: {generationState.status}
+                                      </span>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedVideoSceneIndex(group.sceneIndexes[0] || 0)}
+                                        className="px-2 py-1 text-[10px] rounded-md border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+                                      >
+                                        Focus Group
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => calibrateVideoGroup(group.id, group.sceneIndexes)}
+                                        className="px-2 py-1 text-[10px] rounded-md border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+                                      >
+                                        Calibrate
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => void runVideoGroupGeneration(group.id, group.name, group.sceneIndexes)}
+                                        disabled={!selectedPhase?.supportsRegenerate || stepRunActive}
+                                        className={clsx(
+                                          'px-2 py-1 text-[10px] rounded-md text-white',
+                                          selectedPhase?.supportsRegenerate && !stepRunActive
+                                            ? 'bg-aegis-primary hover:opacity-90'
+                                            : 'bg-aegis-text-dim opacity-60 cursor-not-allowed',
+                                        )}
+                                      >
+                                        Generate Group
+                                      </button>
+                                    </div>
+                                    {generationState.message ? (
+                                      <p className="text-[10px] text-aegis-text-dim">{generationState.message}</p>
+                                    ) : null}
+                                    {calibration.notes.length > 0 ? (
+                                      <div className="rounded-md border border-aegis-warning/25 bg-aegis-warning/[0.08] p-1.5 space-y-1">
+                                        {calibration.notes.slice(0, 3).map((note, noteIndex) => (
+                                          <p key={`video-group-${group.id}-note-${noteIndex}`} className="text-[10px] text-aegis-warning">
+                                            {note}
+                                          </p>
+                                        ))}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              {videoShotUnits.map((shot) => {
+                                const generationTargetKey = `shot:${shot.key}`;
+                                const generationState = videoGenerationStateByTarget[generationTargetKey] || {
+                                  status: 'idle',
+                                  message: '',
+                                  updatedAt: null,
+                                };
+                                const calibrated = !!shot.action;
+                                return (
+                                  <div key={`video-shot-mode-${shot.key}`} className="rounded-md border border-aegis-border bg-aegis-elevated p-2 space-y-2">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[11px] text-aegis-text">{shot.sceneId}</span>
+                                      <span className="text-[10px] text-aegis-text-dim">· {shot.id}</span>
+                                      <span className="ml-auto text-[10px] text-aegis-text-dim">~{Math.round(shot.estimatedDuration)}s</span>
+                                    </div>
+                                    <p className="text-[10px] text-aegis-text-dim">
+                                      {shot.action || 'No action prompt yet.'}
+                                    </p>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span
+                                        className={clsx(
+                                          'px-1.5 py-0.5 rounded border text-[10px]',
+                                          calibrated
+                                            ? 'border-aegis-success/35 text-aegis-success bg-aegis-success/[0.08]'
+                                            : 'border-aegis-warning/35 text-aegis-warning bg-aegis-warning/[0.08]',
+                                        )}
+                                      >
+                                        calibration: {calibrated ? 'ready' : 'needs action prompt'}
+                                      </span>
+                                      <span
+                                        className={clsx(
+                                          'px-1.5 py-0.5 rounded border text-[10px]',
+                                          generationState.status === 'success'
+                                            ? 'border-aegis-success/35 text-aegis-success bg-aegis-success/[0.08]'
+                                            : generationState.status === 'error'
+                                              ? 'border-aegis-danger/35 text-aegis-danger bg-aegis-danger/[0.08]'
+                                              : generationState.status === 'running'
+                                                ? 'border-aegis-primary/35 text-aegis-primary bg-aegis-primary/[0.08]'
+                                                : 'border-aegis-border text-aegis-text-dim bg-aegis-card',
+                                        )}
+                                      >
+                                        run: {generationState.status}
+                                      </span>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedVideoSceneIndex(shot.sceneIndex);
+                                          setSelectedVideoTutorialStepId('shot_prompting');
+                                        }}
+                                        className="px-2 py-1 text-[10px] rounded-md border border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]"
+                                      >
+                                        Focus Shot
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => void runVideoSingleShotGeneration(shot)}
+                                        disabled={!selectedPhase?.supportsRegenerate || stepRunActive}
+                                        className={clsx(
+                                          'px-2 py-1 text-[10px] rounded-md text-white',
+                                          selectedPhase?.supportsRegenerate && !stepRunActive
+                                            ? 'bg-aegis-primary hover:opacity-90'
+                                            : 'bg-aegis-text-dim opacity-60 cursor-not-allowed',
+                                        )}
+                                      >
+                                        Generate Shot
+                                      </button>
+                                    </div>
+                                    {generationState.message ? (
+                                      <p className="text-[10px] text-aegis-text-dim">{generationState.message}</p>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          <div className="rounded-lg border border-aegis-primary/20 bg-aegis-primary/[0.05] p-2 space-y-2">
+                            <p className="text-[11px] text-aegis-text-dim">Scene Studio</p>
+                            <div className="space-y-2">
+                              {videoSceneDrafts.map((scene, sceneIndex) => {
+                                const sceneShots = (Array.isArray(scene.shots) ? scene.shots : [])
+                                  .map((shot) => asRecord(shot) || {})
+                                  .filter((shot) => Object.keys(shot).length > 0);
+                                const isSelected = sceneIndex === selectedVideoSceneIndex;
+                                const showShotEditors =
+                                  isSelected ||
+                                  selectedVideoTutorialStepId === 'shot_prompting' ||
+                                  selectedVideoTutorialStepId === 'audio_motion';
+                                return (
+                                  <div
+                                    key={`video-scene-card-${sceneIndex}`}
+                                    className={clsx(
+                                      'rounded-md border p-2 space-y-2',
+                                      isSelected
+                                        ? 'border-aegis-primary/40 bg-aegis-primary/[0.08]'
+                                        : 'border-aegis-border bg-aegis-elevated',
+                                    )}
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedVideoSceneIndex(sceneIndex)}
+                                        className={clsx(
+                                          'px-2 py-1 text-[10px] rounded-md border',
+                                          isSelected
+                                            ? 'border-aegis-primary/45 bg-aegis-primary/15 text-aegis-primary'
+                                            : 'border-aegis-border text-aegis-text hover:bg-[rgb(var(--aegis-overlay)/0.04)]',
+                                        )}
+                                      >
+                                        {pickString(scene, ['id']) || `Scene ${sceneIndex + 1}`}
+                                      </button>
+                                      <span className="text-[10px] text-aegis-text-dim">{pickString(scene, ['type']) || 'Unknown type'}</span>
+                                      <span className="ml-auto text-[10px] text-aegis-text-dim">
+                                        {sceneShots.length} shots
+                                      </span>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+                                      <label className="flex flex-col gap-1">
+                                        <span className="text-[10px] text-aegis-text-dim">Narrative Goal</span>
+                                        <textarea
+                                          value={pickString(scene, ['narrative_goal', 'narrativeGoal'])}
+                                          onChange={(event) => updateVideoSceneFieldAt(sceneIndex, 'narrative_goal', event.target.value)}
+                                          className="min-h-[60px] rounded-md border border-aegis-border bg-aegis-card px-2 py-2 text-[11px] text-aegis-text outline-none resize-y"
+                                        />
+                                      </label>
+                                      <label className="flex flex-col gap-1">
+                                        <span className="text-[10px] text-aegis-text-dim">Emotional Tone</span>
+                                        <input
+                                          value={pickString(scene, ['emotional_tone', 'emotionalTone'])}
+                                          onChange={(event) => updateVideoSceneFieldAt(sceneIndex, 'emotional_tone', event.target.value)}
+                                          className="rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[11px] text-aegis-text outline-none"
+                                        />
+                                      </label>
+                                    </div>
+
+                                    {showShotEditors ? (
+                                      <div className="space-y-2">
+                                        {sceneShots.length === 0 ? (
+                                          <p className="text-[10px] text-aegis-text-dim">No shots found in this scene.</p>
+                                        ) : (
+                                          sceneShots.map((shot, shotIndex) => (
+                                            <div
+                                              key={`video-scene-${sceneIndex}-shot-${shotIndex}`}
+                                              className="rounded-md border border-aegis-border bg-aegis-card p-2 space-y-1.5"
+                                            >
+                                              <p className="text-[10px] text-aegis-text-dim">
+                                                Shot {shotIndex + 1} · {pickString(shot, ['id']) || 'No id'}
+                                              </p>
+                                              <label className="flex flex-col gap-1">
+                                                <span className="text-[10px] text-aegis-text-dim">Action Prompt</span>
+                                                <textarea
+                                                  value={pickString(shot, ['action_description', 'actionDescription'])}
+                                                  onChange={(event) =>
+                                                    updateVideoShotFieldAt(sceneIndex, shotIndex, 'action_description', event.target.value)
+                                                  }
+                                                  className="min-h-[56px] rounded-md border border-aegis-border bg-aegis-elevated px-2 py-2 text-[11px] text-aegis-text outline-none resize-y"
+                                                />
+                                              </label>
+                                              <label className="flex flex-col gap-1">
+                                                <span className="text-[10px] text-aegis-text-dim">Narration</span>
+                                                <textarea
+                                                  value={pickString(shot, ['speech_content', 'speechContent'])}
+                                                  onChange={(event) =>
+                                                    updateVideoShotFieldAt(sceneIndex, shotIndex, 'speech_content', event.target.value)
+                                                  }
+                                                  className="min-h-[72px] rounded-md border border-aegis-border bg-aegis-elevated px-2 py-2 text-[11px] text-aegis-text outline-none resize-y"
+                                                />
+                                              </label>
+                                            </div>
+                                          ))
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <p className="text-[10px] text-aegis-text-dim">
+                                        Select this scene to edit shot prompts.
+                                      </p>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="min-h-0 rounded-lg border border-aegis-primary/25 bg-aegis-card p-2.5 flex flex-col gap-3 overflow-y-auto">
+                    <div className="flex items-center gap-2">
+                      <p className="text-[11px] text-aegis-text-dim">Inspector And Run</p>
+                      <span className="ml-auto text-[10px] text-aegis-text-dim">{activeVideoTutorialStep.title}</span>
+                    </div>
+
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[10px] text-aegis-text-dim">Video JSON</span>
+                      <select
+                        value={selectedVideoPlanPath}
+                        onChange={(event) => {
+                          setSelectedVideoPlanPath(event.target.value);
+                          setVideoPlanStatus('');
+                        }}
+                        className="w-full rounded-md border border-aegis-border bg-aegis-elevated px-2 py-1.5 text-[11px] text-aegis-text outline-none"
+                      >
+                        {videoJsonArtifacts.length === 0 && <option value="">No video artifacts found</option>}
+                        {videoJsonArtifacts.map((entry) => (
+                          <option key={entry.relativePath} value={entry.relativePath}>
+                            {entry.relativePath.replace(/^.*\/09_video\//, '')}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[10px] text-aegis-text-dim">Scene Jump</span>
+                      <select
+                        value={String(selectedVideoSceneIndex)}
+                        onChange={(event) => setSelectedVideoSceneIndex(Number(event.target.value) || 0)}
+                        className="w-full rounded-md border border-aegis-border bg-aegis-elevated px-2 py-1.5 text-[11px] text-aegis-text outline-none"
+                      >
+                        {videoSceneDrafts.length === 0 && <option value="0">No scenes found</option>}
+                        {videoSceneDrafts.map((scene, index) => (
+                          <option key={`video-scene-selector-${index}`} value={index}>
+                            {pickString(scene, ['id']) || `Scene ${index + 1}`} · {pickString(scene, ['type']) || 'Unknown type'}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div
+                      className={clsx(
+                        'rounded-md border p-2 space-y-2',
+                        selectedVideoTutorialStepId === 'story_setup'
+                          ? 'border-aegis-primary/45 bg-aegis-primary/[0.1]'
+                          : 'border-aegis-border bg-aegis-elevated',
+                      )}
+                    >
+                      <p className="text-[11px] text-aegis-text-dim">Render Settings</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[10px] text-aegis-text-dim">Model</span>
+                          <input
+                            value={pickString(videoRenderConfig, ['model'])}
+                            onChange={(event) => updateVideoPlanValue(['render', 'model'], event.target.value)}
+                            placeholder="seedance-2.0-pro / seedance-1.5 fallback"
+                            className="w-full rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[11px] text-aegis-text outline-none"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[10px] text-aegis-text-dim">Ratio</span>
+                          <select
+                            value={pickString(videoResolvedRenderOptions, ['ratio']) || 'adaptive'}
+                            onChange={(event) => updateVideoPlanValue(['render', 'resolved_options', 'ratio'], event.target.value)}
+                            className="w-full rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[11px] text-aegis-text outline-none"
+                          >
+                            <option value="adaptive">adaptive</option>
+                            <option value="16:9">16:9</option>
+                            <option value="9:16">9:16</option>
+                            <option value="1:1">1:1</option>
+                          </select>
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[10px] text-aegis-text-dim">Duration (s)</span>
+                          <input
+                            type="number"
+                            min={2}
+                            max={30}
+                            value={pickNumber(videoResolvedRenderOptions, ['duration'], 5)}
+                            onChange={(event) =>
+                              updateVideoPlanValue(
+                                ['render', 'resolved_options', 'duration'],
+                                Math.max(2, Math.min(30, Number(event.target.value) || 5)),
+                              )
+                            }
+                            className="w-full rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[11px] text-aegis-text outline-none"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[10px] text-aegis-text-dim">Seed</span>
+                          <input
+                            type="number"
+                            value={pickNumber(videoResolvedRenderOptions, ['seed'], 100)}
+                            onChange={(event) =>
+                              updateVideoPlanValue(
+                                ['render', 'resolved_options', 'seed'],
+                                Math.max(0, Number(event.target.value) || 100),
+                              )
+                            }
+                            className="w-full rounded-md border border-aegis-border bg-aegis-card px-2 py-1.5 text-[11px] text-aegis-text outline-none"
+                          />
+                        </label>
+                      </div>
+                      <div className="grid grid-cols-1 gap-2">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-aegis-text-dim">Visual Style</span>
+                            <span className="text-[10px] text-aegis-text-dim">Hint: look + camera + lighting + pacing</span>
+                          </div>
+                          <textarea
+                            value={pickString(videoVisualDirection, ['style'])}
+                            onChange={(event) => updateVideoPlanValue(['visual_direction', 'style'], event.target.value)}
+                            placeholder="Example: Documentary realism, steady camera, soft natural lighting, continuity-first pacing."
+                            className="min-h-[56px] rounded-md border border-aegis-border bg-aegis-card px-2 py-2 text-[11px] text-aegis-text outline-none resize-y"
+                          />
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <select
+                              value={selectedVideoStyleTemplateId}
+                              onChange={(event) => {
+                                const nextId = event.target.value;
+                                setSelectedVideoStyleTemplateId(nextId);
+                                const template = VIDEO_VISUAL_STYLE_TEMPLATES.find((item) => item.id === nextId);
+                                if (template) {
+                                  applyVideoTextTemplate(
+                                    ['visual_direction', 'style'],
+                                    template.value,
+                                    'replace',
+                                    'Visual style',
+                                  );
+                                }
+                              }}
+                              className="min-w-[180px] rounded-md border border-aegis-border bg-aegis-elevated px-2 py-1 text-[10px] text-aegis-text outline-none"
+                            >
+                              {VIDEO_VISUAL_STYLE_TEMPLATES.map((template) => (
+                                <option key={`video-style-template-${template.id}`} value={template.id}>
+                                  {template.label}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="text-[10px] text-aegis-text-dim">Selecting a template auto-fills this field.</span>
+                            {selectedVideoStyleTemplate ? (
+                              <span className="text-[10px] text-aegis-text-dim">{selectedVideoStyleTemplate.hint}</span>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-aegis-text-dim">Palette</span>
+                            <span className="text-[10px] text-aegis-text-dim">Hint: base tone + accents + contrast mood</span>
+                          </div>
+                          <textarea
+                            value={pickString(videoVisualDirection, ['palette'])}
+                            onChange={(event) => updateVideoPlanValue(['visual_direction', 'palette'], event.target.value)}
+                            placeholder="Example: Deep navy base, teal accents, neutral white highlights, low saturation."
+                            className="min-h-[56px] rounded-md border border-aegis-border bg-aegis-card px-2 py-2 text-[11px] text-aegis-text outline-none resize-y"
+                          />
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <select
+                              value={selectedVideoPaletteTemplateId}
+                              onChange={(event) => {
+                                const nextId = event.target.value;
+                                setSelectedVideoPaletteTemplateId(nextId);
+                                const template = VIDEO_PALETTE_TEMPLATES.find((item) => item.id === nextId);
+                                if (template) {
+                                  applyVideoTextTemplate(
+                                    ['visual_direction', 'palette'],
+                                    template.value,
+                                    'replace',
+                                    'Palette',
+                                  );
+                                }
+                              }}
+                              className="min-w-[180px] rounded-md border border-aegis-border bg-aegis-elevated px-2 py-1 text-[10px] text-aegis-text outline-none"
+                            >
+                              {VIDEO_PALETTE_TEMPLATES.map((template) => (
+                                <option key={`video-palette-template-${template.id}`} value={template.id}>
+                                  {template.label}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="text-[10px] text-aegis-text-dim">Selecting a template auto-fills this field.</span>
+                            {selectedVideoPaletteTemplate ? (
+                              <span className="text-[10px] text-aegis-text-dim">{selectedVideoPaletteTemplate.hint}</span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <label className="inline-flex items-center gap-2 text-[11px] text-aegis-text">
+                          <input
+                            type="checkbox"
+                            checked={pickBoolean(videoResolvedRenderOptions, ['generate_audio'], true)}
+                            onChange={(event) => updateVideoPlanValue(['render', 'resolved_options', 'generate_audio'], event.target.checked)}
+                          />
+                          Generate audio
+                        </label>
+                        <label className="inline-flex items-center gap-2 text-[11px] text-aegis-text">
+                          <input
+                            type="checkbox"
+                            checked={pickBoolean(videoResolvedRenderOptions, ['watermark'], false)}
+                            onChange={(event) => updateVideoPlanValue(['render', 'resolved_options', 'watermark'], event.target.checked)}
+                          />
+                          Watermark
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border border-aegis-border bg-aegis-elevated p-2 space-y-2">
+                      <p className="text-[11px] text-aegis-text-dim">Execution</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void saveVideoPlanWorkspace()}
+                          disabled={!videoPlanDirty}
+                          className={clsx(
+                            'px-2.5 py-1.5 text-[11px] rounded-md border',
+                            videoPlanDirty
+                              ? 'border-aegis-success/30 bg-aegis-success/[0.08] text-aegis-success hover:bg-aegis-success/[0.14]'
+                              : 'border-aegis-border text-aegis-text-dim opacity-60 cursor-not-allowed',
+                          )}
+                        >
+                          Save Workspace
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void regeneratePhase()}
+                          disabled={
+                            !selectedPhase?.supportsRegenerate ||
+                            stepRunActive ||
+                            (!videoStudioExpertMode && videoPlanDirty)
+                          }
+                          className={clsx(
+                            'px-2.5 py-1.5 text-[11px] rounded-md text-white',
+                            selectedPhase?.supportsRegenerate && !stepRunActive && (videoStudioExpertMode || !videoPlanDirty)
+                              ? 'bg-aegis-primary hover:opacity-90'
+                              : 'bg-aegis-text-dim opacity-60 cursor-not-allowed',
+                          )}
+                        >
+                          {stepRunActive && regenStatus.mode === 'phase' ? 'Running Video...' : 'Run Video Phase'}
+                        </button>
+                      </div>
+                      {videoPlanDirty ? (
+                        <p className="text-[10px] text-aegis-warning">
+                          Unsaved edits detected. Save first to keep tutorial and execution in sync.
+                        </p>
+                      ) : null}
+                      {videoPlanStatus ? <p className="text-[10px] text-aegis-text-dim">{videoPlanStatus}</p> : null}
+                      {videoPlanError ? <p className="text-[10px] text-aegis-danger">{videoPlanError}</p> : null}
                     </div>
                   </div>
                 </div>

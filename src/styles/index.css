@@ -131,6 +131,28 @@
     background: rgb(var(--aegis-overlay) / 0.72);
   }
 
+  /* Social Studio right rail: explicit, visible vertical scrollbar */
+  .social-side-scroll {
+    scrollbar-width: auto;
+    scrollbar-color: rgb(var(--aegis-overlay) / 0.6) rgb(var(--aegis-overlay) / 0.08);
+  }
+  .social-side-scroll::-webkit-scrollbar {
+    width: 10px;
+  }
+  .social-side-scroll::-webkit-scrollbar-track {
+    background: rgb(var(--aegis-overlay) / 0.08);
+    border-radius: 10px;
+  }
+  .social-side-scroll::-webkit-scrollbar-thumb {
+    background: rgb(var(--aegis-overlay) / 0.6);
+    border-radius: 10px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .social-side-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--aegis-overlay) / 0.78);
+  }
+
   /* ── Background Ambient Glow (from conceptual JSX) ── */
   .ambient-glow-teal {
     position: fixed; top: -200px; right: -200px;

@@ -30,7 +30,10 @@
     "terminal": "الطرفية",
     "aella": "Aella",
     "knowledge": "المعرفة",
+    "documents": "استوديو المستندات",
+    "llmGateway": "بوابة LLM",
     "creation": "الإنشاء",
+    "social": "السوشيال",
     "notifications": "الإشعارات"
   },
   "skills": {

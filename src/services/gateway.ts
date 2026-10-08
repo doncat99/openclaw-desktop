@@ -748,6 +748,136 @@ class GatewayService {
     return this.request('team.evolve.propose', params);
   }
 
+  // ── Social Platform Core (via OpenClaw Gateway plugin) ──
+
+  async getSocialHealth(params: Record<string, any> = {}): Promise<any> {
+    return this.request('social.health', params);
+  }
+
+  async listSocialAccounts(params: Record<string, any> = {}): Promise<any> {
+    return this.request('social.accounts.list', params);
+  }
+
+  async startSocialAccountConnect(params: Record<string, any>): Promise<any> {
+    return this.request('social.accounts.connect.start', params);
+  }
+
+  async getSocialAccountConnectStatus(params: Record<string, any>): Promise<any> {
+    return this.request('social.accounts.connect.status', params);
+  }
+
+  async disconnectSocialAccount(params: Record<string, any>): Promise<any> {
+    return this.request('social.accounts.disconnect', params);
+  }
+
+  async updateSocialAccountSettings(params: Record<string, any>): Promise<any> {
+    return this.request('social.accounts.settings.update', params);
+  }
+
+  async startSocialAccountReauth(params: Record<string, any>): Promise<any> {
+    return this.request('social.accounts.reauth.start', params);
+  }
+
+  async listSocialWorkspaceOauthApps(params: Record<string, any> = {}): Promise<any> {
+    return this.request('social.settings.oauth_apps.list', params);
+  }
+
+  async upsertSocialWorkspaceOauthApp(params: Record<string, any>): Promise<any> {
+    return this.request('social.settings.oauth_apps.upsert', params);
+  }
+
+  async deleteSocialWorkspaceOauthApp(params: Record<string, any>): Promise<any> {
+    return this.request('social.settings.oauth_apps.delete', params);
+  }
+
+  async getSocialGenerationSettings(params: Record<string, any> = {}): Promise<any> {
+    return this.request('social.settings.generation.list', params);
+  }
+
+  async upsertSocialGenerationSettings(params: Record<string, any>): Promise<any> {
+    return this.request('social.settings.generation.upsert', params);
+  }
+
+  async deleteSocialGenerationSettings(params: Record<string, any>): Promise<any> {
+    return this.request('social.settings.generation.delete', params);
+  }
+
+  async generateSocialContent(params: Record<string, any>): Promise<any> {
+    return this.request('social.content.generate', params);
+  }
+
+  async listSocialPosts(params: Record<string, any> = {}): Promise<any> {
+    return this.request('social.posts.list', params);
+  }
+
+  async queueSocialPost(params: Record<string, any>): Promise<any> {
+    return this.request('social.publish.queue', params);
+  }
+
+  async publishSocialPostNow(params: Record<string, any>): Promise<any> {
+    return this.request('social.publish.now', params);
+  }
+
+  async listSocialJobs(params: Record<string, any> = {}): Promise<any> {
+    return this.request('social.jobs.list', params);
+  }
+
+  async listOntoSynthApplications(): Promise<any> {
+    return this.request('ontosynth.applications.list', {});
+  }
+
+  async getOntoSynthDocumentPreviewHealth(params: Record<string, any> = {}): Promise<any> {
+    return this.request('ontosynth.document_preview.health', params);
+  }
+
+  async listOntoSynthDocumentPreviews(params: Record<string, any>): Promise<any> {
+    return this.request('ontosynth.document_preview.list', params);
+  }
+
+  async openOntoSynthDocumentPreview(params: Record<string, any>): Promise<any> {
+    return this.request('ontosynth.document_preview.open', params);
+  }
+
+  async generateOntoSynthDocumentPreview(params: Record<string, any>): Promise<any> {
+    return this.request('ontosynth.document_preview.generate', params);
+  }
+
+  async getOntoSynthLlmGatewayHealth(params: Record<string, any> = {}): Promise<any> {
+    return this.request('ontosynth.llm_gateway.health', params);
+  }
+
+  async getOntoSynthLlmGatewayAudit(params: Record<string, any> = {}): Promise<any> {
+    return this.request('ontosynth.llm_gateway.audit', params);
+  }
+
+  async getOntoSynthLlmGatewayFacets(params: Record<string, any> = {}): Promise<any> {
+    return this.request('ontosynth.llm_gateway.facets', params);
+  }
+
+  async getOntoSynthLlmGatewayPolicies(params: Record<string, any> = {}): Promise<any> {
+    return this.request('ontosynth.llm_gateway.policies', params);
+  }
+
+  async setOntoSynthLlmGatewayPolicy(params: Record<string, any> = {}): Promise<any> {
+    return this.request('ontosynth.llm_gateway.set_policy', params);
+  }
+
+  async getOntoSynthLlmGatewaySummary(params: Record<string, any> = {}): Promise<any> {
+    return this.request('ontosynth.llm_gateway.summary', params);
+  }
+
+  async getOntoSynthLlmGatewayDeadLetters(params: Record<string, any> = {}): Promise<any> {
+    return this.request('ontosynth.llm_gateway.dead_letters', params);
+  }
+
+  async cancelOntoSynthLlmGatewayRequest(params: Record<string, any>): Promise<any> {
+    return this.request('ontosynth.llm_gateway.cancel', params);
+  }
+
+  async requeueOntoSynthLlmGatewayDeadLetter(params: Record<string, any>): Promise<any> {
+    return this.request('ontosynth.llm_gateway.requeue_dead_letter', params);
+  }
+
   /** Public gateway RPC — use for one-off calls not covered by dedicated methods */
   async call(method: string, params: any = {}): Promise<any> {
     return this.request(method, params);

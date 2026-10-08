@@ -30,7 +30,10 @@
     "terminal": "Terminal",
     "aella": "Aella",
     "knowledge": "Knowledge",
+    "documents": "Documents",
+    "llmGateway": "LLM Gateway",
     "creation": "Creation",
+    "social": "Social",
     "notifications": "Notifications"
   },
   "skills": {

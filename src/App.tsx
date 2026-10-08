@@ -16,7 +16,10 @@ import { TaskRpgPage } from '@/pages/TaskRpg';
 import { TeamMonitorPage } from '@/pages/TeamMonitor';
 import { AellaExplorerPage } from '@/pages/AellaExplorer';
 import { KnowledgeAtlasPage } from '@/pages/KnowledgeAtlas';
+import { DocumentStudioPage } from '@/pages/DocumentStudio';
+import { LlmGatewayPage } from '@/pages/LlmGateway';
 import { StepFlowPage } from '@/pages/StepFlow';
+import { SocialStudioPage } from '@/pages/SocialStudio';
 import { PairingScreen } from '@/components/PairingScreen';
 import { ToastContainer } from '@/components/Toast/ToastContainer';
 import { useChatStore } from '@/stores/chatStore';
@@ -337,7 +340,10 @@ export default function App() {
             <Route path="/skills" element={<SkillsPageFull />} />
             <Route path="/aella" element={<AellaExplorerPage />} />
             <Route path="/knowledge" element={<KnowledgeAtlasPage />} />
+            <Route path="/documents" element={<DocumentStudioPage />} />
+            <Route path="/llm-gateway" element={<LlmGatewayPage />} />
             <Route path="/creation" element={<StepFlowPage />} />
+            <Route path="/social" element={<SocialStudioPage />} />
             <Route path="/stepper" element={<StepFlowPage />} />
             <Route path="/terminal" element={<TerminalPage />} />
             <Route path="/memory" element={<MemoryExplorerPage />} />
